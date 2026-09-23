@@ -9,3 +9,4 @@ state/*.json
 agent/
 skills-lock.json
 recordings/
+research-data/
