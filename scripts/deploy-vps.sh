@@ -12,15 +12,28 @@ echo "===================================================================="
 
 # 1. Update system packages
 echo "📦 [1/5] Updating system packages..."
-sudo apt-get update -y
-sudo apt-get install -y curl git build-essential
+if command -v apt-get &> /dev/null; then
+  sudo apt-get update -y
+  sudo apt-get install -y curl git build-essential
+elif command -v dnf &> /dev/null; then
+  sudo dnf update -y
+  sudo dnf install -y curl git make gcc-c++
+elif command -v yum &> /dev/null; then
+  sudo yum update -y
+  sudo yum install -y curl git make gcc-c++
+fi
 
 # 2. Install Node.js 20 LTS (if not installed or version < 20)
 echo "🟢 [2/5] Checking Node.js runtime..."
 if ! command -v node &> /dev/null || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 20 ]; then
-  echo "Installing Node.js 20 LTS via NodeSource..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  echo "Installing Node.js 20 LTS..."
+  if command -v apt-get &> /dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  elif command -v dnf &> /dev/null; then
+    sudo dnf module enable nodejs:20 -y 2>/dev/null || true
+    sudo dnf install -y nodejs
+  fi
 fi
 
 echo "Node.js version: $(node -v)"
