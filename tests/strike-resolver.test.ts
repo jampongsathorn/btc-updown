@@ -126,7 +126,25 @@ describe("StrikeResolver", () => {
     const requestedUrl = fetchSpy.mock.calls[0][0] as string;
     expect(requestedUrl).not.toMatch(/\.\d+Z/); // no fractional seconds anywhere in the URL
     expect(requestedUrl).toContain("start=2026-09-23T17:40:00Z");
-    expect(requestedUrl).toContain("end=2026-09-23T17:42:00Z");
+    expect(requestedUrl).toContain("end=2026-09-23T17:45:00Z"); // 300s window - see the window-width regression test below
+
+    fetchSpy.mockRestore();
+  });
+
+  it("requests at least a 300s window, not the old 120s one (confirmed 2026-09-23 via direct curl: Coinbase deterministically returns [] for an exactly-120s span at a given start, but 180s+ from the SAME start returns real candles)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => [[1790185200, 84000, 84050, 84009.25, 84030, 12.5]],
+    } as Response);
+
+    const resolver = new StrikeResolver();
+    await resolver.resolveStrike(1790185200);
+
+    const requestedUrl = fetchSpy.mock.calls[0][0] as string;
+    const start = new URL(requestedUrl).searchParams.get("start")!;
+    const end = new URL(requestedUrl).searchParams.get("end")!;
+    const spanSeconds = (new Date(end).getTime() - new Date(start).getTime()) / 1000;
+    expect(spanSeconds).toBeGreaterThanOrEqual(180);
 
     fetchSpy.mockRestore();
   });

@@ -39,8 +39,17 @@ export class StrikeResolver {
     // ".000Z", which made this fail 100% of the time (confirmed 2026-09-23 via
     // direct curl: identical request minus the ".000" returns real candles).
     const toSecondIso = (unixSec: number) => new Date(unixSec * 1000).toISOString().replace(".000Z", "Z");
+    // Window width matters, separately from the ".000Z" bug above: confirmed
+    // 2026-09-23 that a request spanning exactly 120s (2 x granularity=60
+    // buckets) reliably returns [] from Coinbase - a THIRD request for the
+    // exact same start but a 180s+ span returns the real candles correctly,
+    // reproduced deterministically via curl. This was the actual reason a
+    // live slot could go its entire ~220s window without ever resolving even
+    // after the ".000Z" and retry fixes: every attempt used exactly this
+    // 120s span. 300s (comfortably past whatever internal threshold this is)
+    // costs nothing extra - the code below only ever looks for one candle.
     const isoStart = toSecondIso(epoch);
-    const isoEnd = toSecondIso(epoch + 120);
+    const isoEnd = toSecondIso(epoch + 300);
     const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?start=${isoStart}&end=${isoEnd}&granularity=60`;
 
     // Confirmed 2026-09-23: intermittent bare "fetch failed" (a connection-level
