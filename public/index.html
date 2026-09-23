@@ -780,6 +780,14 @@
       }
     }
 
+    // Auto-send initial Discord connection confirmation once on page load
+    setTimeout(() => {
+      if (!sessionStorage.getItem("discord_verified")) {
+        sessionStorage.setItem("discord_verified", "true");
+        sendTestAlert();
+      }
+    }, 1500);
+
     setInterval(fetchState, 500);
     setInterval(syncTokens, 4000);
     setInterval(syncDiscordAlerts, 1000);
