@@ -42,9 +42,24 @@ export class StrikeResolver {
     const isoStart = toSecondIso(epoch);
     const isoEnd = toSecondIso(epoch + 120);
     const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?start=${isoStart}&end=${isoEnd}&granularity=60`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Coinbase candle API error: ${res.statusText}`);
-    return (await res.json()) as any[];
+
+    // Confirmed 2026-09-23: intermittent bare "fetch failed" (a connection-level
+    // failure, not an HTTP error status) happens occasionally even though a
+    // tight 8-request burst moments later succeeded 8/8 - genuinely transient,
+    // not a rate limit. One quick retry costs ~300ms and meaningfully improves
+    // the odds of catching the T0 candle within resolveStrike's polling window,
+    // versus waiting a full 5s for the next scheduled attempt.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Coinbase candle API error: ${res.statusText}`);
+        return (await res.json()) as any[];
+      } catch (err) {
+        if (attempt === 2) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+    return []; // unreachable - satisfies the compiler
   }
 
   public async resolveStrike(epoch: number): Promise<StrikeResolution | null> {

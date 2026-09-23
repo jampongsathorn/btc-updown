@@ -131,6 +131,23 @@ describe("StrikeResolver", () => {
     fetchSpy.mockRestore();
   });
 
+  it("retries once on a transient fetch failure before giving up (confirmed 2026-09-23: intermittent bare 'fetch failed' on an otherwise-healthy connection)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [[1790185200, 84000, 84050, 84009.25, 84030, 12.5]],
+      } as Response);
+
+    const resolver = new StrikeResolver(); // real fetch path, not the injected mock
+    const result = await resolver.resolveStrike(1790185200);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result?.strike).toBe(84009.25);
+
+    fetchSpy.mockRestore();
+  });
+
   it("pruneOlderThan evicts stale epochs but keeps current/future ones", async () => {
     const mockFetcher = vi.fn().mockResolvedValue([
       [1790185200, 84000, 84050, 84009.25, 84030, 12.5],
