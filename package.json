@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/index.ts",
-    "signal": "tsx src/cli.ts signal"
+    "signal": "tsx src/cli.ts signal",
+    "log": "tsx src/cli.ts log"
   },
   "dependencies": {
     "express": "^4.21.2",

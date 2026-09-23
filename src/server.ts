@@ -9,6 +9,7 @@ export interface ServerOptions {
   onRelayEvent: (event: NormalizedEvent) => void;
   getActiveTokens: () => { current: string[]; next: string[] };
   setTokenIds?: (current: { up: string; down: string }, next?: { up: string; down: string }) => void;
+  getLatestFlightSummary?: () => any;
 }
 
 export function createServer(options: ServerOptions) {
@@ -57,6 +58,15 @@ export function createServer(options: ServerOptions) {
     } else {
       res.status(400).json({ error: "Invalid tokens payload" });
     }
+  });
+
+  app.get("/api/flight-log/latest", (_req, res) => {
+    const summary = options.getLatestFlightSummary?.();
+    if (!summary) {
+      res.status(404).json({ message: "No flight logs recorded yet" });
+      return;
+    }
+    res.json(summary);
   });
 
   app.get("/api/health", (_req, res) => {

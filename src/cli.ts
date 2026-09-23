@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from "fs";
+import path from "path";
 import { StateStore } from "./state.js";
 import { assertCanTrade } from "./guard.js";
 
@@ -51,4 +53,44 @@ function formatSignal() {
   console.log("\x1b[36m============================================================\x1b[0m\n");
 }
 
-formatSignal();
+function showLog() {
+  const isJson = process.argv.includes("--json");
+  const logDir = path.join(process.cwd(), "recordings");
+  if (!fs.existsSync(logDir)) {
+    console.log("No flight logs recorded yet.");
+    return;
+  }
+  const files = fs.readdirSync(logDir).filter(f => f.startsWith("flight-log-") && f.endsWith(".json")).sort().reverse();
+  if (files.length === 0) {
+    console.log("No flight logs recorded yet.");
+    return;
+  }
+
+  const latestFile = path.join(logDir, files[0]);
+  const content = JSON.parse(fs.readFileSync(latestFile, "utf8"));
+  if (isJson) {
+    console.log(JSON.stringify(content, null, 2));
+    return;
+  }
+
+  const s = content.summary;
+  console.log("\n\x1b[1m\x1b[35m============================================================\x1b[0m");
+  console.log(`\x1b[1m  MARKET FLIGHT RECORDER SUMMARY — ${s.slug}\x1b[0m`);
+  console.log("\x1b[1m\x1b[35m============================================================\x1b[0m");
+  console.log(`  Window:             ${s.startedAt} -> ${s.finishedAt}`);
+  console.log(`  Total Ticks:        ${s.totalTicks} data points`);
+  console.log(`  Up Mid Range:       $${s.upMidMin.toFixed(3)} -> $${s.upMidMax.toFixed(3)} (Delta: $${s.upMidRange.toFixed(3)})`);
+  console.log(`  Down Mid Range:     $${s.downMidMin.toFixed(3)} -> $${s.downMidMax.toFixed(3)}`);
+  console.log(`  Average Spread:     Up: $${s.avgSpreadUp.toFixed(3)} | Down: $${s.avgSpreadDown.toFixed(3)}`);
+  console.log(`  Mid Parity (Avg):   $${s.avgMidParity.toFixed(4)} (Min: $${s.minMidParity.toFixed(4)}, Max: $${s.maxMidParity.toFixed(4)})`);
+  console.log(`  Lowest Ask Sum:     $${s.minBuyBothCost.toFixed(4)}`);
+  console.log(`  Max Net Arb Edge:   $${s.maxNetEdge.toFixed(4)}`);
+  console.log(`  Arb Opportunities:  ${s.arbOpportunityTicks} ticks (${s.arbOpportunityPct}%)`);
+  console.log("\x1b[35m============================================================\x1b[0m\n");
+}
+
+if (process.argv.includes("log")) {
+  showLog();
+} else {
+  formatSignal();
+}
