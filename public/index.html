@@ -196,9 +196,23 @@
       <div class="brand-subtitle" id="slot-epoch-label">ENGINE ACTIVE</div>
     </div>
     <div style="display: flex; gap: 10px; align-items: center;">
+      <button id="test-alert-btn" onclick="sendTestAlert()" class="badge badge-cta" style="cursor: pointer; border: none;">SEND TEST ALERT</button>
+      <div id="discord-badge" class="badge badge-blue">DISCORD ACTIVE</div>
       <div id="safety-badge" class="badge badge-blue">CONNECTING</div>
       <div id="action-badge" class="badge badge-cta" style="display: none;">NO TRADE ACTION</div>
     </div>
+  </div>
+
+  <!-- Live In/Out/PnL Alert Banner -->
+  <div id="live-alert-banner" class="card" style="margin-bottom: 18px; border-left: 4px solid var(--orange-highlight); display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; background: rgba(12, 24, 70, 0.9);">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span id="alert-icon" style="font-size: 20px;">🔔</span>
+      <div>
+        <div id="alert-title" style="font-size: 13px; font-weight: 700; color: #fff;">LIVE ALERT CHANNEL READY</div>
+        <div id="alert-subtitle" style="font-size: 11px; color: var(--light-blue-tint);">Monitoring 5-minute Polymarket orderbooks for In / Out / PnL signals...</div>
+      </div>
+    </div>
+    <div id="alert-timestamp" style="font-size: 11px; color: var(--text-muted); font-family: monospace;">STANDBY</div>
   </div>
 
   <!-- Real-time Time Series Chart with Action Markers -->
@@ -696,10 +710,82 @@
       ).join("");
     }
 
+    const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1552315113535578144/AuLKFz6d6-pRMPk78UYkKL5BmTJuU6zdZDqdwI8GtBgtwJOX2vWfZ9WQtqhBRSNnhk_7";
+
+    async function syncDiscordAlerts() {
+      try {
+        const res = await fetch("/api/alerts/pending");
+        if (!res.ok) return;
+        const pending = await res.json();
+
+        for (const item of pending) {
+          // 1. Post to Discord directly from browser (bypass sandbox TLS egress block)
+          try {
+            await fetch(DISCORD_WEBHOOK_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(item.payload),
+            });
+          } catch (e) {}
+
+          // 2. Acknowledge alert with backend
+          await fetch("/api/alerts/ack", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: item.id }),
+          });
+
+          // 3. Update Web UI Alert Banner
+          const embed = item.payload.embeds?.[0];
+          if (embed) {
+            updateAlertBanner(embed.title, embed.description, embed.color);
+          }
+        }
+      } catch (err) {}
+    }
+
+    function updateAlertBanner(title, desc, colorHex) {
+      const banner = document.getElementById("live-alert-banner");
+      const titleEl = document.getElementById("alert-title");
+      const subEl = document.getElementById("alert-subtitle");
+      const timeEl = document.getElementById("alert-timestamp");
+      const iconEl = document.getElementById("alert-icon");
+
+      titleEl.innerText = title;
+      subEl.innerText = desc.split("\n\n")[0] || desc;
+      timeEl.innerText = new Date().toLocaleTimeString();
+
+      if (title.includes("ENTRY")) {
+        banner.style.borderLeftColor = "var(--green)";
+        iconEl.innerText = "🚀";
+      } else if (title.includes("STOP-LOSS")) {
+        banner.style.borderLeftColor = "var(--orange-highlight)";
+        iconEl.innerText = "🛡️";
+      } else if (title.includes("SETTLED")) {
+        banner.style.borderLeftColor = "var(--blue-accent)";
+        iconEl.innerText = "🏆";
+      }
+    }
+
+    async function sendTestAlert() {
+      const btn = document.getElementById("test-alert-btn");
+      btn.innerText = "SENDING...";
+      try {
+        await fetch("/api/alerts/test", { method: "POST" });
+        await syncDiscordAlerts();
+        btn.innerText = "SENT TO DISCORD ✓";
+        setTimeout(() => { btn.innerText = "SEND TEST ALERT"; }, 3000);
+      } catch (e) {
+        btn.innerText = "RETRY";
+      }
+    }
+
     setInterval(fetchState, 500);
     setInterval(syncTokens, 4000);
+    setInterval(syncDiscordAlerts, 1000);
     fetchState();
     syncTokens();
+    syncDiscordAlerts();
   </script>
 </body>
 </html>

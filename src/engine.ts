@@ -10,11 +10,18 @@ import { evaluateVarianceCollapse, VarianceCollapseResult } from "./strategies/v
 import { PaperWallet } from "./paper-wallet.js";
 import { RealizedVolatilityEstimator } from "./volatility.js";
 import { calculateKellyFraction, calculateOrderSizeShares } from "./kelly.js";
+import {
+  formatEntryAlert,
+  formatStopLossAlert,
+  formatSettlementAlert,
+  DiscordWebhookPayload
+} from "./alerts.js";
 
 export interface EngineOptions {
   config?: EngineConfig;
   stateStore?: StateStore;
   autoConnectNodeWs?: boolean;
+  onAlert?: (payload: DiscordWebhookPayload) => void;
 }
 
 export class MarketEngine {
@@ -51,11 +58,13 @@ export class MarketEngine {
   private isConnected: boolean = false;
   private transportSource: "node-ws" | "browser-relay" | "idle" = "idle";
   private tickInterval: NodeJS.Timeout | null = null;
+  private onAlert?: (payload: DiscordWebhookPayload) => void;
 
   constructor(options?: EngineOptions) {
     this.config = options?.config || DEFAULT_CONFIG;
     this.stateStore = options?.stateStore || new StateStore();
     this.scheduler = new SlotScheduler({ warmupSeconds: this.config.WARMUP_SECONDS });
+    this.onAlert = options?.onAlert;
 
     this.currentSlot = this.scheduler.getCurrentSlot();
     this.nextSlot = this.scheduler.getNextSlot();
@@ -152,7 +161,29 @@ export class MarketEngine {
         // Settle previous slot in paper wallet
         const prevEpoch = this.currentSlot.epoch;
         const winner = this.currentSpot >= this.priceToBeat ? "UP" : "DOWN";
-        this.wallet.settleSlot(prevEpoch, winner);
+        const prevActive = this.wallet.getStats().activePositions.find(p => p.slotEpoch === prevEpoch);
+        const slotPnl = this.wallet.settleSlot(prevEpoch, winner);
+
+        if (prevActive) {
+          const stats = this.wallet.getStats();
+          const invested = prevActive.shares * prevActive.price + prevActive.fee;
+          const retPct = invested > 0 ? parseFloat(((slotPnl / invested) * 100).toFixed(1)) : 0;
+          const alert = formatSettlementAlert({
+            slotEpoch: prevEpoch,
+            slug: this.currentSlot.slug,
+            won: prevActive.side === winner,
+            side: winner,
+            finalPrice: this.currentSpot,
+            strikePrice: this.priceToBeat,
+            netPnlUsd: slotPnl,
+            returnPct: retPct,
+            totalBankrollUsd: stats.balanceUsd,
+            winRatePct: stats.winRatePct,
+            wins: stats.wins,
+            losses: stats.losses,
+          });
+          this.onAlert?.(alert);
+        }
 
         // Promote next to current
         this.currentSlot = newCurrent;
@@ -232,7 +263,27 @@ export class MarketEngine {
     if (strategyResult.recommendedAction === "STOP_LOSS_EXIT" && currentActivePos) {
       const exitBid = currentActivePos.side === "UP" ? upLeg.bestBid : downLeg.bestBid;
       const exitFee = this.feeSchedule.rate * exitBid * (1 - exitBid) * currentActivePos.shares;
+      const invested = currentActivePos.shares * currentActivePos.price + currentActivePos.fee;
+      const recovered = currentActivePos.shares * exitBid - exitFee;
+      const lossCapped = invested - recovered;
+      const savedPct = invested > 0 ? (recovered / invested) * 100 : 0;
+
       this.wallet.closeEarly(this.currentSlot.epoch, exitBid, exitFee, "STOP_LOSS");
+
+      const alert = formatStopLossAlert({
+        slotEpoch: this.currentSlot.epoch,
+        slug: this.currentSlot.slug,
+        side: currentActivePos.side,
+        strikePrice: effectivePriceToBeat,
+        currentSpot: effectiveSpot,
+        entryPrice: currentActivePos.price,
+        exitBidPrice: exitBid,
+        shares: currentActivePos.shares,
+        lossCappedUsd: parseFloat(lossCapped.toFixed(2)),
+        capitalPreservedPct: parseFloat(savedPct.toFixed(1)),
+        reason: strategyResult.reason,
+      });
+      this.onAlert?.(alert);
     } else if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && strategyResult.recommendedAction !== "STOP_LOSS_EXIT" && safety.canTrade) {
       if (!currentActivePos && orderSize.shares > 0) {
         if (strategyResult.recommendedAction === "BUY_UP" && upLeg.bestAsk > 0) {
@@ -245,6 +296,23 @@ export class MarketEngine {
             price: upLeg.bestAsk,
             fee,
           });
+
+          const alert = formatEntryAlert({
+            slotEpoch: this.currentSlot.epoch,
+            slug: this.currentSlot.slug,
+            side: "UP",
+            strikePrice: effectivePriceToBeat,
+            spotPrice: effectiveSpot,
+            trueProbability: strategyResult.trueProbabilityUp,
+            expectedValueUsd: strategyResult.expectedValueUp,
+            netRoiPct: strategyResult.netEdgeUpPct,
+            entryPrice: upLeg.bestAsk,
+            shares,
+            totalCostUsd: parseFloat((shares * upLeg.bestAsk + fee).toFixed(2)),
+            realizedVol: dynamicVol,
+            secondsRemaining: this.currentSlot.secondsRemaining,
+          });
+          this.onAlert?.(alert);
         } else if (strategyResult.recommendedAction === "BUY_DOWN" && downLeg.bestAsk > 0) {
           const shares = Math.min(orderSize.shares, downLeg.askTopSize || orderSize.shares);
           const fee = this.feeSchedule.rate * downLeg.bestAsk * (1 - downLeg.bestAsk) * shares;
@@ -255,6 +323,23 @@ export class MarketEngine {
             price: downLeg.bestAsk,
             fee,
           });
+
+          const alert = formatEntryAlert({
+            slotEpoch: this.currentSlot.epoch,
+            slug: this.currentSlot.slug,
+            side: "DOWN",
+            strikePrice: effectivePriceToBeat,
+            spotPrice: effectiveSpot,
+            trueProbability: strategyResult.trueProbabilityDown,
+            expectedValueUsd: strategyResult.expectedValueDown,
+            netRoiPct: strategyResult.netEdgeDownPct,
+            entryPrice: downLeg.bestAsk,
+            shares,
+            totalCostUsd: parseFloat((shares * downLeg.bestAsk + fee).toFixed(2)),
+            realizedVol: dynamicVol,
+            secondsRemaining: this.currentSlot.secondsRemaining,
+          });
+          this.onAlert?.(alert);
         }
       }
     }

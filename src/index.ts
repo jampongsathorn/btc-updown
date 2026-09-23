@@ -3,7 +3,14 @@ import { createServer } from "./server.js";
 import { MarketRecorder } from "./recorder.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
-const engine = new MarketEngine({ config: DEFAULT_CONFIG });
+let emitAlertCallback: ((payload: any) => void) | undefined;
+
+const engine = new MarketEngine({
+  config: DEFAULT_CONFIG,
+  onAlert: (payload) => {
+    emitAlertCallback?.(payload);
+  },
+});
 const recorder = new MarketRecorder();
 
 // Hook state updates to flight recorder
@@ -12,24 +19,27 @@ setInterval(() => {
   if (state) recorder.recordTick(state);
 }, 250);
 
-const app = createServer({
+const serverOptions = {
   port: DEFAULT_CONFIG.PORT,
   stateStore: engine.stateStore,
-  onRelayEvent: (event) => {
+  onRelayEvent: (event: any) => {
     engine.handleNormalizedEvent(event, "browser-relay");
   },
   getActiveTokens: () => ({
     current: [engine.currentTokens.up, engine.currentTokens.down].filter(Boolean),
     next: [engine.nextTokens.up, engine.nextTokens.down].filter(Boolean),
   }),
-  setTokenIds: (current, next) => {
+  setTokenIds: (current: any, next: any) => {
     engine.setTokenIds(current, next);
   },
-  setSpotPrices: (spot, priceToBeat) => {
+  setSpotPrices: (spot: number, priceToBeat?: number) => {
     engine.setSpotPrices(spot, priceToBeat || spot);
   },
   getLatestFlightSummary: () => recorder.getLatestSummary(),
-});
+};
+
+const app = createServer(serverOptions);
+emitAlertCallback = serverOptions.emitAlert;
 
 app.listen(DEFAULT_CONFIG.PORT, "0.0.0.0", () => {
   console.log(`\n\x1b[32m[✓] Polymarket BTC UpDown 5m Engine running on http://0.0.0.0:${DEFAULT_CONFIG.PORT}\x1b[0m`);
