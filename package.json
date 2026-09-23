@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "backtest": "tsx scripts/run-historical-backtest.ts",
     "prove": "tsx scripts/prove-strategy.ts",
+    "prove:timeseries": "tsx scripts/prove-timeseries.ts",
     "start": "tsx src/index.ts",
     "signal": "tsx src/cli.ts signal",
     "log": "tsx src/cli.ts log"
