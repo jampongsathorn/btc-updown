@@ -14,6 +14,7 @@
     "prove:real": "tsx scripts/prove-real-polymarket-rounds.ts",
     "prove:candles": "tsx scripts/prove-real-candles.ts",
     "backtest:month": "tsx scripts/backtest-full-month.ts",
+    "forward:test": "tsx scripts/forward-test-out-of-sample.ts",
     "verify:signals": "tsx scripts/verify-signals.ts",
     "start": "tsx src/index.ts",
     "signal": "tsx src/cli.ts signal",
