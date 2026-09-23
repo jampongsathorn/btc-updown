@@ -113,6 +113,24 @@ describe("StrikeResolver", () => {
     expect(fixed.trueProbabilityUp).toBeGreaterThan(0.9);
   });
 
+  it("requests Coinbase candles without sub-second precision in start/end (confirmed 2026-09-23: Coinbase silently returns [] when ISO timestamps carry '.000Z')", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => [[1790185200, 84000, 84050, 84009.25, 84030, 12.5]],
+    } as Response);
+
+    const resolver = new StrikeResolver(); // no fetchCandles override - exercises the real URL builder
+    await resolver.resolveStrike(1790185200);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const requestedUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(requestedUrl).not.toMatch(/\.\d+Z/); // no fractional seconds anywhere in the URL
+    expect(requestedUrl).toContain("start=2026-09-23T17:40:00Z");
+    expect(requestedUrl).toContain("end=2026-09-23T17:42:00Z");
+
+    fetchSpy.mockRestore();
+  });
+
   it("pruneOlderThan evicts stale epochs but keeps current/future ones", async () => {
     const mockFetcher = vi.fn().mockResolvedValue([
       [1790185200, 84000, 84050, 84009.25, 84030, 12.5],

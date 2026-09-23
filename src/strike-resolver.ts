@@ -34,8 +34,13 @@ export class StrikeResolver {
   }
 
   private async defaultFetchCandles(epoch: number): Promise<any[]> {
-    const isoStart = new Date(epoch * 1000).toISOString();
-    const isoEnd = new Date((epoch + 120) * 1000).toISOString();
+    // Coinbase's candles endpoint silently returns [] (HTTP 200, no error) if
+    // start/end carry sub-second precision - Date.toISOString() always emits
+    // ".000Z", which made this fail 100% of the time (confirmed 2026-09-23 via
+    // direct curl: identical request minus the ".000" returns real candles).
+    const toSecondIso = (unixSec: number) => new Date(unixSec * 1000).toISOString().replace(".000Z", "Z");
+    const isoStart = toSecondIso(epoch);
+    const isoEnd = toSecondIso(epoch + 120);
     const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?start=${isoStart}&end=${isoEnd}&granularity=60`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Coinbase candle API error: ${res.statusText}`);
