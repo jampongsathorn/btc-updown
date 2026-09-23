@@ -62,9 +62,12 @@ echo "🔨 [5/5] Installing dependencies and building production engine..."
 npm install
 npm run build
 
-echo "🚦 Starting engine under PM2 supervisor..."
+echo "🚦 Starting engine and auto-sync daemon under PM2 supervisor..."
 pm2 delete btc-sniper 2>/dev/null || true
+pm2 delete btc-sync 2>/dev/null || true
+
 pm2 start dist/index.js --name "btc-sniper" --time
+pm2 start scripts/auto-sync.sh --name "btc-sync" --interpreter bash
 
 echo "💾 Setting PM2 to start on system boot..."
 pm2 save
@@ -72,11 +75,10 @@ sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u "$USER" --hp "$HOME" || true
 
 echo ""
 echo "===================================================================="
-echo "✅ DEPLOYMENT COMPLETE! The bot is now running 24/7 in the background."
+echo "✅ DEPLOYMENT COMPLETE! The bot and auto-sync daemon are now running 24/7."
 echo "===================================================================="
 echo "Useful Commands:"
-echo "  • View Live Logs:      pm2 logs btc-sniper"
-echo "  • View Process Status: pm2 status"
-echo "  • Restart Bot:         pm2 restart btc-sniper"
-echo "  • Stop Bot:            pm2 stop btc-sniper"
+echo "  • View Bot Logs:        pm2 logs btc-sniper"
+echo "  • View Auto-Sync Logs:  pm2 logs btc-sync"
+echo "  • View All Processes:   pm2 status"
 echo "===================================================================="
