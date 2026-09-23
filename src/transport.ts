@@ -75,8 +75,10 @@ export class NodeWsClient {
   private ws: WebSocket | null = null;
   private normalizer = new TransportNormalizer();
   private pingInterval: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
   private activeSubscriptions: Set<string> = new Set();
   private isConnected = false;
+  private closedByUser = false;
 
   constructor(private options: NodeWsClientOptions) {
     this.wsUrl = options.wsUrl || "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -124,6 +126,13 @@ export class NodeWsClient {
     this.isConnected = false;
     if (this.pingInterval) clearInterval(this.pingInterval);
     this.options.onDisconnect?.();
+
+    if (!this.closedByUser && !this.reconnectTimer) {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect();
+      }, 3000);
+    }
   }
 
   public subscribe(assetIds: string[]): void {
@@ -152,6 +161,8 @@ export class NodeWsClient {
   }
 
   public close(): void {
+    this.closedByUser = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.pingInterval) clearInterval(this.pingInterval);
     if (this.ws) {
       this.ws.close();

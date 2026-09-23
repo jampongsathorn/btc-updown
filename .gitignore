@@ -8,3 +8,4 @@ state/*.json
 .codex/
 agent/
 skills-lock.json
+recordings/

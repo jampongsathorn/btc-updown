@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BTC UpDown — YES Probability</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #11151c;
+    --border: #1f2530;
+    --text: #e8ecf1;
+    --muted: #7c8698;
+    --up: #22c55e;
+    --down: #ef4444;
+    --hold: #4b5563;
+    --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 24px 16px 40px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; color: var(--text); }
+  .conn { font-size: 12px; color: var(--muted); }
+  .conn.live::before { content: "●"; color: var(--up); margin-right: 6px; }
+  .conn.down::before { content: "●"; color: var(--down); margin-right: 6px; }
+
+  .top-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .stat .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .stat .sub a { color: var(--accent); text-decoration: none; }
+  .stat .sub a:hover { text-decoration: underline; }
+
+  .timebar {
+    margin-top: 8px;
+    height: 6px;
+    border-radius: 999px;
+    background: #1f2530;
+    overflow: hidden;
+  }
+  .timebar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width .3s linear, background-color .3s linear;
+  }
+  .timebar-fill.warn { background: #f59e0b; }
+  .timebar-fill.danger { background: var(--down); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.BUY_UP { background: rgba(34,197,94,.15); color: var(--up); }
+  .badge.BUY_DOWN { background: rgba(239,68,68,.15); color: var(--down); }
+  .badge.HOLD_NO_EDGE { background: rgba(75,85,99,.25); color: var(--muted); }
+  .badge.STOP_LOSS_EXIT { background: rgba(245,158,11,.15); color: #f59e0b; }
+  .badge.INIT { background: rgba(75,85,99,.25); color: var(--muted); }
+
+  .chart-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    height: 380px;
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .legend span::before {
+    content: "●";
+    margin-right: 5px;
+  }
+  .legend .l-up::before { color: var(--up); }
+  .legend .l-down::before { color: var(--down); }
+  .legend .l-line::before { color: var(--accent); }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>BTC UpDown — YES Probability (rolling)</h1>
+    <span id="conn" class="conn">connecting…</span>
+  </header>
+
+  <div class="top-row">
+    <div class="stat">
+      <div class="label">YES Probability</div>
+      <div class="value" id="probVal">—</div>
+      <div class="sub" id="probSide">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Signal</div>
+      <div class="value"><span id="signalBadge" class="badge INIT">—</span></div>
+      <div class="sub" id="signalReason">waiting for data…</div>
+    </div>
+    <div class="stat">
+      <div class="label">Spot / Strike</div>
+      <div class="value" id="spotVal">—</div>
+      <div class="sub" id="strikeVal">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Slot ends in</div>
+      <div class="value" id="secsVal">—</div>
+      <div class="timebar"><div class="timebar-fill" id="timeBarFill"></div></div>
+      <div class="sub"><a id="slugLink" href="#" target="_blank" rel="noopener">—</a></div>
+    </div>
+  </div>
+
+  <div class="chart-panel">
+    <canvas id="chart"></canvas>
+  </div>
+  <div class="legend">
+    <span class="l-line">YES probability (%)</span>
+    <span class="l-up">BUY_UP signal</span>
+    <span class="l-down">BUY_DOWN signal</span>
+  </div>
+
+  <footer>polling /api/state every 1s · rolling window ~10 min</footer>
+</div>
+
+<script>
+const MAX_POINTS = 600; // ~10 min at 1s polling
+const ctx = document.getElementById('chart').getContext('2d');
+
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'YES probability',
+        data: [],
+        borderColor: '#38bdf8',
+        backgroundColor: 'rgba(56,189,248,.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.25,
+        order: 2,
+      },
+      {
+        label: 'BUY_UP',
+        data: [],
+        showLine: false,
+        pointRadius: 5,
+        pointBackgroundColor: '#22c55e',
+        pointBorderColor: '#22c55e',
+        order: 1,
+      },
+      {
+        label: 'BUY_DOWN',
+        data: [],
+        showLine: false,
+        pointRadius: 5,
+        pointBackgroundColor: '#ef4444',
+        pointBorderColor: '#ef4444',
+        order: 1,
+      },
+    ],
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        ticks: { color: '#7c8698', maxTicksLimit: 8 },
+        grid: { color: '#1f2530' },
+      },
+      y: {
+        min: 0,
+        max: 100,
+        ticks: { color: '#7c8698', callback: (v) => v + '%' },
+        grid: { color: '#1f2530' },
+      },
+    },
+  },
+});
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function pushPoint(state) {
+  const t = fmtTime(state.meta.generatedAt);
+  const strat = state.strategy;
+  const probUp = strat ? strat.trueProbabilityUp * 100 : null;
+  const action = strat ? strat.recommendedAction : null;
+
+  chart.data.labels.push(t);
+  chart.data.datasets[0].data.push(probUp);
+  chart.data.datasets[1].data.push(action === 'BUY_UP' ? probUp : null);
+  chart.data.datasets[2].data.push(action === 'BUY_DOWN' ? probUp : null);
+
+  if (chart.data.labels.length > MAX_POINTS) {
+    chart.data.labels.shift();
+    chart.data.datasets.forEach(ds => ds.data.shift());
+  }
+  chart.update('none');
+}
+
+function updateStats(state) {
+  const strat = state.strategy;
+  const probEl = document.getElementById('probVal');
+  const sideEl = document.getElementById('probSide');
+  const badge = document.getElementById('signalBadge');
+  const reason = document.getElementById('signalReason');
+  const spotEl = document.getElementById('spotVal');
+  const strikeEl = document.getElementById('strikeVal');
+  const secsEl = document.getElementById('secsVal');
+
+  if (strat) {
+    const pctUp = (strat.trueProbabilityUp * 100).toFixed(1);
+    probEl.textContent = pctUp + '%';
+    sideEl.textContent = 'YES (UP)';
+
+    badge.textContent = strat.recommendedAction;
+    badge.className = 'badge ' + strat.recommendedAction;
+    reason.textContent = strat.reason || '';
+
+    spotEl.textContent = strat.currentSpot ? '$' + strat.currentSpot.toFixed(2) : '—';
+    strikeEl.textContent = strat.priceToBeat ? 'strike $' + strat.priceToBeat.toFixed(2) : '—';
+  }
+
+  secsEl.textContent = state.slot ? state.slot.secondsRemaining + 's' : '—';
+
+  const slugLink = document.getElementById('slugLink');
+  if (state.slot && state.slot.slug) {
+    slugLink.textContent = state.slot.slug;
+    slugLink.href = 'https://polymarket.com/event/' + state.slot.slug;
+  } else {
+    slugLink.textContent = '—';
+    slugLink.href = '#';
+  }
+
+  const fill = document.getElementById('timeBarFill');
+  if (state.slot) {
+    const remaining = state.slot.secondsRemaining;
+    const pct = Math.max(0, Math.min(100, (remaining / 300) * 100));
+    fill.style.width = pct + '%';
+    fill.className = 'timebar-fill' + (remaining <= 30 ? ' danger' : remaining <= 90 ? ' warn' : '');
+  }
+}
+
+let failCount = 0;
+async function poll() {
+  try {
+    const res = await fetch('/api/state', { cache: 'no-store' });
+    if (!res.ok) throw new Error('bad status');
+    const state = await res.json();
+    document.getElementById('conn').textContent = 'live';
+    document.getElementById('conn').className = 'conn live';
+    failCount = 0;
+    updateStats(state);
+    pushPoint(state);
+  } catch (e) {
+    failCount++;
+    document.getElementById('conn').textContent = 'disconnected';
+    document.getElementById('conn').className = 'conn down';
+  }
+}
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

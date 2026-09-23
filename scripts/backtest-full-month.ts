@@ -110,6 +110,7 @@ function runFullMonthSimulation(): {
 
       // Simulate 300 seconds of GBM + Jump process
       let btcSec = slotStrike;
+      let spotAt235 = slotStrike; // market's pricing basis (5s stale vs decision tick)
       let spotAt240 = slotStrike;
       let spotAt275 = slotStrike;
 
@@ -127,6 +128,7 @@ function runFullMonthSimulation(): {
           btcSec += jumpAmount;
         }
 
+        if (s === 235) spotAt235 = btcSec;
         if (s === 240) spotAt240 = btcSec;
         if (s === 275) spotAt275 = btcSec;
       }
@@ -134,18 +136,30 @@ function runFullMonthSimulation(): {
       const slotResolution = btcSec;
       const actualOutcome: "UP" | "DOWN" = slotResolution >= slotStrike ? "UP" : "DOWN";
 
-      // Evaluate at Sniper Window (t = 240s, 60s remaining)
-      const sniperDrift = spotAt240 - slotStrike;
-      const isUp = sniperDrift > 0;
-      const absDrift = Math.abs(sniperDrift);
+      // Realistic market pricing model: the market quote tracks the SAME
+      // lognormal-diffusion probability the strategy itself uses, but priced
+      // off a slightly stale (5s lag) spot, plus a bid-ask spread + no
+      // artificial cap. This replaces the old model where ask price was
+      // hardcoded to plateau at 0.90 regardless of how far price had moved -
+      // that hardcoded ceiling manufactured free edge whenever true
+      // probability exceeded 90%, which is exactly the trade filter's entry
+      // condition. A market maker who is only 5s slow (not blind) is the
+      // more honest adversary to test against.
+      const marketBasis = evaluateVarianceCollapse({
+        currentSpot: spotAt235,
+        priceToBeat: slotStrike,
+        secondsRemaining: 65,
+        upAsk: 0.5, upBid: 0.5, downAsk: 0.5, downBid: 0.5, // unused, just need probabilities
+        annualizedVol: dayVol,
+      });
 
-      // Polymarket CLOB pricing model
-      const dominantAsk = Math.min(0.93, Math.max(0.72, parseFloat((0.76 + Math.min(0.14, absDrift / 350)).toFixed(2))));
-      const otherAsk = parseFloat((1.00 - dominantAsk + 0.03).toFixed(2));
-      const upAsk = isUp ? dominantAsk : otherAsk;
-      const downAsk = isUp ? otherAsk : dominantAsk;
-      const upBid = parseFloat((upAsk - 0.02).toFixed(2));
-      const downBid = parseFloat((downAsk - 0.02).toFixed(2));
+      const halfSpread = 0.015; // ~3c round-trip spread, typical for thin 5m CLOB books
+      const clampPrice = (p: number) => Math.min(0.99, Math.max(0.01, p));
+
+      const upAsk = parseFloat(clampPrice(marketBasis.trueProbabilityUp + halfSpread).toFixed(2));
+      const downAsk = parseFloat(clampPrice(marketBasis.trueProbabilityDown + halfSpread).toFixed(2));
+      const upBid = parseFloat(clampPrice(marketBasis.trueProbabilityUp - halfSpread).toFixed(2));
+      const downBid = parseFloat(clampPrice(marketBasis.trueProbabilityDown - halfSpread).toFixed(2));
 
       const signal = evaluateVarianceCollapse({
         currentSpot: spotAt240,
