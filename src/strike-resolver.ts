@@ -53,11 +53,14 @@ export class StrikeResolver {
 
     try {
       const candles = await this.fetchCandlesFn(epoch);
-      if (!Array.isArray(candles) || candles.length === 0) return null;
+      if (!Array.isArray(candles) || candles.length === 0) return null; // expected: T0 candle not closed yet
 
       // Coinbase candle format: [time, low, high, open, close, volume]
       const match = candles.find((c) => Math.abs(c[0] - epoch) < 60);
-      if (!match || !(match[3] > 0)) return null;
+      if (!match || !(match[3] > 0)) {
+        console.error(`[strike-resolver] Got ${candles.length} candle(s) for epoch ${epoch} but none matched the T0 boundary - unexpected, not just "not closed yet"`);
+        return null;
+      }
 
       const resolution: StrikeResolution = {
         strike: parseFloat(match[3]),
@@ -68,7 +71,13 @@ export class StrikeResolver {
 
       this.cache.set(epoch, resolution);
       return resolution;
-    } catch {
+    } catch (err: any) {
+      // Distinguishing this from the "not closed yet" case above matters:
+      // that one is expected and silent by design (see class doc comment),
+      // but a real network/rate-limit failure here was previously
+      // indistinguishable from it, making the 2026-09-23 intermittent
+      // resolution failures impossible to diagnose from logs alone.
+      console.error(`[strike-resolver] resolveStrike(${epoch}) failed: ${err?.message || err}`);
       return null;
     }
   }
