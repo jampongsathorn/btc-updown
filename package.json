@@ -1,0 +1,36 @@
+{
+  "name": "btc-updown",
+  "version": "1.0.0",
+  "description": "Polymarket 5m BTC Up/Down real-time auto-rolling market engine and signal system",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "backtest": "tsx scripts/run-historical-backtest.ts",
+    "prove": "tsx scripts/prove-strategy.ts",
+    "prove:timeseries": "tsx scripts/prove-timeseries.ts",
+    "prove:real": "tsx scripts/prove-real-polymarket-rounds.ts",
+    "prove:candles": "tsx scripts/prove-real-candles.ts",
+    "backtest:month": "tsx scripts/backtest-full-month.ts",
+    "forward:test": "tsx scripts/forward-test-out-of-sample.ts",
+    "verify:signals": "tsx scripts/verify-signals.ts",
+    "start": "tsx src/index.ts",
+    "signal": "tsx src/cli.ts signal",
+    "log": "tsx src/cli.ts log"
+  },
+  "dependencies": {
+    "@polymarket/clob-client": "^5.8.1",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.9",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  }
+}

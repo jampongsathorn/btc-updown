@@ -1,0 +1,511 @@
+import { DEFAULT_CONFIG, EngineConfig, LiveEngineState } from "./types.js";
+import { Orderbook } from "./orderbook.js";
+import { SlotScheduler, SlotInfo } from "./scheduler.js";
+import { calculateSignals } from "./signals.js";
+import { calculateEconomics, FeeSchedule } from "./economics.js";
+import { evaluateSafety } from "./validator.js";
+import { StateStore } from "./state.js";
+import { NodeWsClient, NormalizedEvent } from "./transport.js";
+import { evaluateVarianceCollapse, VarianceCollapseResult, normalCdf } from "./strategies/variance-collapse.js";
+import { ChainlinkTwapPredictor } from "./twap-interpolator.js";
+import { liveTrader, isLiveTradingEnabled } from "./live-trader.js";
+import { PaperWallet } from "./paper-wallet.js";
+import { RealizedVolatilityEstimator } from "./volatility.js";
+import { calculateKellyFraction, calculateOrderSizeShares } from "./kelly.js";
+import {
+  formatEntryAlert,
+  formatStopLossAlert,
+  formatSettlementAlert,
+  DiscordWebhookPayload
+} from "./alerts.js";
+
+export interface EngineOptions {
+  config?: EngineConfig;
+  stateStore?: StateStore;
+  autoConnectNodeWs?: boolean;
+  onAlert?: (payload: DiscordWebhookPayload) => void;
+}
+
+export class MarketEngine {
+  public config: EngineConfig;
+  public stateStore: StateStore;
+  public scheduler: SlotScheduler;
+
+  // Active current slot
+  public currentSlot: SlotInfo;
+  public upBook = new Orderbook();
+  public downBook = new Orderbook();
+  public currentTokens: { up: string; down: string } = { up: "", down: "" };
+
+  // Next slot during warm-up
+  public nextSlot: SlotInfo;
+  public nextUpBook = new Orderbook();
+  public nextDownBook = new Orderbook();
+  public nextTokens: { up: string; down: string } = { up: "", down: "" };
+
+  public wallet = new PaperWallet({ initialUsd: 1000 });
+  public priceToBeat: number = 0;
+  // See strike-resolver.ts: priceToBeat is only trustworthy once anchored to
+  // the real T0 boundary candle via setStrikePrice(). strikeVerified gates
+  // canTrade via evaluateSafety(); strikeVerifiedEpoch lets the caller (see
+  // index.ts updateSlotStrike()) know whether the CURRENT slot's strike has
+  // already been resolved, so it doesn't refetch every tick.
+  public strikeVerified: boolean = false;
+  public strikeVerifiedEpoch: number | null = null;
+  public currentSpot: number = 0;
+  private volatilityEstimator = new RealizedVolatilityEstimator();
+  // SHADOW MODE (see plan): TWAP-aware probability is computed and exposed
+  // in state for observation only. It does NOT drive recommendedAction,
+  // Kelly sizing, or paper-wallet execution - those still use the original
+  // spot-diffusion evaluateVarianceCollapse() result, unchanged.
+  private twapPredictor!: ChainlinkTwapPredictor;
+
+  private feeSchedule: FeeSchedule = {
+    rate: 0.07,
+    exponent: 1,
+    takerOnly: true,
+    rebateRate: 0.2,
+  };
+  private feeModelVerified: boolean = true;
+  private lastTickMs: number = 0;
+  private nodeWs: NodeWsClient | null = null;
+  private isConnected: boolean = false;
+  private transportSource: "node-ws" | "browser-relay" | "idle" = "idle";
+  private tickInterval: NodeJS.Timeout | null = null;
+  private onAlert?: (payload: DiscordWebhookPayload) => void;
+  // Tracks the live (real-money) position opened via liveTrader.placeMarketBuy,
+  // so it can be sold on stop-loss or at slot end. Paper-wallet positions are
+  // tracked separately in this.wallet and are unaffected by this.
+  private liveOpenPosition: { epoch: number; tokenId: string; side: "UP" | "DOWN" } | null = null;
+
+  constructor(options?: EngineOptions) {
+    this.config = options?.config || DEFAULT_CONFIG;
+    this.stateStore = options?.stateStore || new StateStore();
+    this.scheduler = new SlotScheduler({ warmupSeconds: this.config.WARMUP_SECONDS });
+    this.onAlert = options?.onAlert;
+
+    this.currentSlot = this.scheduler.getCurrentSlot();
+    this.nextSlot = this.scheduler.getNextSlot();
+    this.twapPredictor = new ChainlinkTwapPredictor({ slotEpoch: this.currentSlot.epoch });
+
+    if (options?.autoConnectNodeWs !== false) {
+      this.initNodeWs();
+    }
+  }
+
+  private initNodeWs(): void {
+    this.nodeWs = new NodeWsClient({
+      onConnect: () => {
+        this.isConnected = true;
+        this.transportSource = "node-ws";
+      },
+      onDisconnect: () => {
+        if (this.transportSource === "node-ws") {
+          this.isConnected = false;
+        }
+      },
+      onEvent: (event) => {
+        this.handleNormalizedEvent(event, "node-ws");
+      },
+    });
+
+    try {
+      this.nodeWs.connect();
+    } catch {}
+  }
+
+  public setTokenIds(current: { up: string; down: string }, next?: { up: string; down: string }): void {
+    this.currentTokens = current;
+    if (next) this.nextTokens = next;
+
+    if (this.nodeWs) {
+      const allTokens = [current.up, current.down, next?.up, next?.down].filter(Boolean) as string[];
+      this.nodeWs.subscribe(allTokens);
+    }
+    this.updateState();
+  }
+
+  public handleNormalizedEvent(event: NormalizedEvent, source: "node-ws" | "browser-relay"): void {
+    this.lastTickMs = Date.now();
+    this.isConnected = true;
+    this.transportSource = source;
+
+    const assetId = event.assetId;
+
+    let targetBook: Orderbook | null = null;
+    if (assetId === this.currentTokens.up) targetBook = this.upBook;
+    else if (assetId === this.currentTokens.down) targetBook = this.downBook;
+    else if (assetId === this.nextTokens.up) targetBook = this.nextUpBook;
+    else if (assetId === this.nextTokens.down) targetBook = this.nextDownBook;
+
+    if (!targetBook) {
+      // If token not mapped yet, map to up or down based on order of arrival
+      if (!this.currentTokens.up) {
+        this.currentTokens.up = assetId;
+        targetBook = this.upBook;
+      } else if (!this.currentTokens.down && assetId !== this.currentTokens.up) {
+        this.currentTokens.down = assetId;
+        targetBook = this.downBook;
+      }
+    }
+
+    if (targetBook) {
+      if (event.type === "book" && event.bids && event.asks) {
+        targetBook.applySnapshot(event.bids, event.asks);
+      } else if (event.type === "price_change" && event.priceChanges) {
+        targetBook.applyPriceChange(event.priceChanges);
+      }
+    }
+
+    this.updateState();
+  }
+
+  public setSpotPrices(spot: number, priceToBeat?: number, customNow?: number): void {
+    this.currentSpot = spot;
+    if (priceToBeat !== undefined && priceToBeat > 0) {
+      this.priceToBeat = priceToBeat;
+    }
+    this.volatilityEstimator.recordPrice(spot, customNow);
+    this.updateState(customNow);
+  }
+
+  /**
+   * The only sanctioned way to set priceToBeat with strikeVerified=true.
+   * Ignores stale resolutions for an epoch that is no longer the current
+   * slot (e.g. a slow candle fetch resolving after rollover already reset
+   * priceToBeat for the new slot).
+   */
+  public setStrikePrice(strike: number, epoch: number, source: string): void {
+    if (!(strike > 0) || epoch !== this.currentSlot.epoch) return;
+    this.priceToBeat = strike;
+    this.strikeVerified = true;
+    this.strikeVerifiedEpoch = epoch;
+    this.updateState();
+  }
+
+  public updateState(customNow?: number): LiveEngineState {
+    const now = customNow || Date.now();
+    const oldEpoch = this.currentSlot?.epoch;
+    const oldSlug = this.currentSlot?.slug;
+    this.currentSlot = this.scheduler.getCurrentSlot(now);
+    this.nextSlot = this.scheduler.getNextSlot(now);
+
+    this.scheduler.tick(now, {
+      onWarmup: (next) => {
+        this.nextSlot = next;
+      },
+      onRollover: (newCurrent) => {
+        // Settle previous slot in paper wallet
+        const prevEpoch = oldEpoch || (newCurrent.epoch - 300);
+        const prevSlug = oldSlug || `btc-updown-5m-${prevEpoch}`;
+        const winner = this.currentSpot >= this.priceToBeat ? "UP" : "DOWN";
+        const prevActive = this.wallet.getStats().activePositions.find(p => p.slotEpoch === prevEpoch);
+        const slotPnl = this.wallet.settleSlot(prevEpoch, winner);
+
+        // Auto-exit any live (real-money) position at slot end, right as the
+        // scheduler crosses the slot's end unix timestamp - don't hold real
+        // shares into on-chain resolution/redemption, which this bot doesn't
+        // implement.
+        if (isLiveTradingEnabled() && this.liveOpenPosition && this.liveOpenPosition.epoch === prevEpoch) {
+          this.sellLivePosition("SLOT_END");
+        }
+
+        if (prevActive) {
+          const stats = this.wallet.getStats();
+          const invested = prevActive.shares * prevActive.price + prevActive.fee;
+          const retPct = invested > 0 ? parseFloat(((slotPnl / invested) * 100).toFixed(1)) : 0;
+          const isWin = prevActive.side === winner;
+          const alert = formatSettlementAlert({
+            slotEpoch: prevEpoch,
+            slug: prevSlug,
+            won: isWin,
+            side: winner,
+            entryPrice: prevActive.price,
+            exitPrice: isWin ? 1.00 : 0.00,
+            finalPrice: this.currentSpot,
+            strikePrice: this.priceToBeat,
+            netPnlUsd: slotPnl,
+            returnPct: retPct,
+            totalBankrollUsd: stats.balanceUsd,
+            winRatePct: stats.winRatePct,
+            wins: stats.wins,
+            losses: stats.losses,
+            reason: isWin
+              ? `Slot resolved ${winner} (Chainlink TWAP $${this.currentSpot.toLocaleString()} >= Strike $${this.priceToBeat.toLocaleString()}) • 100% Payout redeemed at $1.00/share`
+              : `Slot resolved ${winner} against open position • 0% payout`,
+          });
+          this.onAlert?.(alert);
+        }
+
+        // Promote next to current
+        this.currentSlot = newCurrent;
+        this.currentTokens = this.nextTokens;
+        this.upBook = this.nextUpBook;
+        this.downBook = this.nextDownBook;
+        this.twapPredictor = new ChainlinkTwapPredictor({ slotEpoch: newCurrent.epoch });
+
+        // Reset next
+        this.nextUpBook = new Orderbook();
+        this.nextDownBook = new Orderbook();
+        this.nextTokens = { up: "", down: "" };
+        this.priceToBeat = 0;
+        this.strikeVerified = false;
+      },
+    });
+
+    const upLeg = this.upBook.toLeg(this.currentTokens.up || "UP_TOKEN");
+    const downLeg = this.downBook.toLeg(this.currentTokens.down || "DOWN_TOKEN");
+
+    const signals = calculateSignals(upLeg, downLeg, this.feeSchedule.rate);
+    const economics = calculateEconomics(upLeg, downLeg, this.feeSchedule, this.config.BENCHMARK_SHARES);
+
+    const safety = evaluateSafety({
+      nowMs: now,
+      lastTickMs: this.lastTickMs,
+      maxBookAgeMs: this.config.MAX_BOOK_AGE_MS,
+      connected: this.isConnected,
+      upCrossed: this.upBook.isCrossed(),
+      downCrossed: this.downBook.isCrossed(),
+      upEmpty: this.upBook.isEmpty(),
+      downEmpty: this.downBook.isEmpty(),
+      feeModelVerified: this.feeModelVerified,
+      strikeVerified: this.strikeVerified,
+    });
+
+    // Evaluate Variance Collapse Quantitative Strategy with Dynamic Realized Volatility
+    const effectiveSpot = this.currentSpot || (this.priceToBeat ? this.priceToBeat * (1 + (upLeg.mid - 0.5) * 0.002) : 85000);
+    const effectivePriceToBeat = this.priceToBeat || effectiveSpot;
+    const dynamicVol = this.volatilityEstimator.getAnnualizedVol();
+
+    // SHADOW MODE: record this tick into the TWAP predictor and compute its
+    // probability estimate purely for observation (see class-level comment).
+    let twapProbabilityUp: number | undefined;
+    let twapProbabilityDown: number | undefined;
+    let twapZScore: number | undefined;
+    if (this.currentSpot > 0 && effectivePriceToBeat > 0) {
+      const elapsedSec = 300 - this.currentSlot.secondsRemaining;
+      this.twapPredictor.recordSpotTick(this.currentSpot, elapsedSec);
+      const twapEstimate = this.twapPredictor.estimateFinalTwap(
+        this.currentSpot,
+        elapsedSec,
+        dynamicVol,
+        effectivePriceToBeat
+      );
+      twapZScore = twapEstimate.zScoreVsStrike;
+      twapProbabilityUp = parseFloat(normalCdf(twapZScore).toFixed(4));
+      twapProbabilityDown = parseFloat((1 - twapProbabilityUp).toFixed(4));
+    }
+
+    const currentActivePos = this.wallet.getStats().activePositions.find(p => p.slotEpoch === this.currentSlot.epoch);
+
+    const strategyResult = evaluateVarianceCollapse({
+      currentSpot: effectiveSpot,
+      priceToBeat: effectivePriceToBeat,
+      secondsRemaining: this.currentSlot.secondsRemaining,
+      upAsk: upLeg.bestAsk,
+      upBid: upLeg.bestBid,
+      downAsk: downLeg.bestAsk,
+      downBid: downLeg.bestBid,
+      annualizedVol: dynamicVol,
+      takerFeeRate: this.feeSchedule.rate,
+      currentPosition: currentActivePos ? { side: currentActivePos.side, entryPrice: currentActivePos.price } : undefined,
+    });
+
+    // Kelly Criterion Optimal Bet Sizing
+    const targetAsk = strategyResult.recommendedAction === "BUY_UP" ? upLeg.bestAsk : downLeg.bestAsk;
+    const winProb = strategyResult.recommendedAction === "BUY_UP" ? strategyResult.trueProbabilityUp : strategyResult.trueProbabilityDown;
+    const kelly = calculateKellyFraction({
+      winProbability: winProb,
+      tokenAsk: targetAsk,
+      takerFeeRate: this.feeSchedule.rate,
+      stopLossPrice: targetAsk * 0.75, // exit early at ~25% loss floor
+      fractionMultiplier: 0.25, // Quarter-Kelly
+    });
+    const orderSize = calculateOrderSizeShares({
+      availableBankrollUsd: this.wallet.getStats().balanceUsd,
+      tokenAsk: targetAsk,
+      fraction: kelly.recommendedFraction > 0 ? kelly.recommendedFraction : 0.05,
+      maxSingleTradeUsd: 150,
+      minShares: 5,
+    });
+
+    strategyResult.realizedVol = dynamicVol;
+    strategyResult.kellyFraction = kelly.recommendedFraction;
+    strategyResult.recommendedShares = orderSize.shares;
+    strategyResult.twapProbabilityUp = twapProbabilityUp;
+    strategyResult.twapProbabilityDown = twapProbabilityDown;
+    strategyResult.twapZScore = twapZScore;
+
+    // Auto Paper Execution: Stop Loss Early Exit or Open Position
+    if (strategyResult.recommendedAction === "STOP_LOSS_EXIT" && currentActivePos) {
+      const exitBid = currentActivePos.side === "UP" ? upLeg.bestBid : downLeg.bestBid;
+      const exitFee = this.feeSchedule.rate * exitBid * (1 - exitBid) * currentActivePos.shares;
+      const invested = currentActivePos.shares * currentActivePos.price + currentActivePos.fee;
+      const recovered = currentActivePos.shares * exitBid - exitFee;
+      const lossCapped = invested - recovered;
+      const savedPct = invested > 0 ? (recovered / invested) * 100 : 0;
+
+      this.wallet.closeEarly(this.currentSlot.epoch, exitBid, exitFee, "STOP_LOSS");
+      if (isLiveTradingEnabled()) this.sellLivePosition("STOP_LOSS");
+
+      const alert = formatStopLossAlert({
+        slotEpoch: this.currentSlot.epoch,
+        slug: this.currentSlot.slug,
+        side: currentActivePos.side,
+        strikePrice: effectivePriceToBeat,
+        currentSpot: effectiveSpot,
+        entryPrice: currentActivePos.price,
+        exitBidPrice: exitBid,
+        shares: currentActivePos.shares,
+        lossCappedUsd: parseFloat(lossCapped.toFixed(2)),
+        capitalPreservedPct: parseFloat(savedPct.toFixed(1)),
+        reason: strategyResult.reason,
+      });
+      this.onAlert?.(alert);
+    } else if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && strategyResult.recommendedAction !== "STOP_LOSS_EXIT" && safety.canTrade) {
+      if (!currentActivePos && orderSize.shares > 0) {
+        if (strategyResult.recommendedAction === "BUY_UP" && upLeg.bestAsk > 0) {
+          const shares = Math.min(orderSize.shares, upLeg.askTopSize || orderSize.shares);
+          const fee = this.feeSchedule.rate * upLeg.bestAsk * (1 - upLeg.bestAsk) * shares;
+          this.wallet.openPosition({
+            slotEpoch: this.currentSlot.epoch,
+            side: "UP",
+            shares,
+            price: upLeg.bestAsk,
+            fee,
+          });
+
+          if (isLiveTradingEnabled()) {
+            const usdAmount = parseFloat((shares * upLeg.bestAsk + fee).toFixed(2));
+            liveTrader.placeMarketBuy(this.currentTokens.up, usdAmount).then((result) => {
+              if (!result.success) console.error(`[live-trader] BUY_UP order failed: ${result.error}`);
+              else {
+                console.log(`[live-trader] BUY_UP order placed: ${result.orderId}`);
+                this.liveOpenPosition = { epoch: this.currentSlot.epoch, tokenId: this.currentTokens.up, side: "UP" };
+              }
+            });
+          }
+
+          const alert = formatEntryAlert({
+            slotEpoch: this.currentSlot.epoch,
+            slug: this.currentSlot.slug,
+            side: "UP",
+            strikePrice: effectivePriceToBeat,
+            spotPrice: effectiveSpot,
+            trueProbability: strategyResult.trueProbabilityUp,
+            expectedValueUsd: strategyResult.expectedValueUp,
+            netRoiPct: strategyResult.netEdgeUpPct,
+            entryPrice: upLeg.bestAsk,
+            shares,
+            totalCostUsd: parseFloat((shares * upLeg.bestAsk + fee).toFixed(2)),
+            realizedVol: dynamicVol,
+            secondsRemaining: this.currentSlot.secondsRemaining,
+          });
+          this.onAlert?.(alert);
+        } else if (strategyResult.recommendedAction === "BUY_DOWN" && downLeg.bestAsk > 0) {
+          const shares = Math.min(orderSize.shares, downLeg.askTopSize || orderSize.shares);
+          const fee = this.feeSchedule.rate * downLeg.bestAsk * (1 - downLeg.bestAsk) * shares;
+          this.wallet.openPosition({
+            slotEpoch: this.currentSlot.epoch,
+            side: "DOWN",
+            shares,
+            price: downLeg.bestAsk,
+            fee,
+          });
+
+          if (isLiveTradingEnabled()) {
+            const usdAmount = parseFloat((shares * downLeg.bestAsk + fee).toFixed(2));
+            liveTrader.placeMarketBuy(this.currentTokens.down, usdAmount).then((result) => {
+              if (!result.success) console.error(`[live-trader] BUY_DOWN order failed: ${result.error}`);
+              else {
+                console.log(`[live-trader] BUY_DOWN order placed: ${result.orderId}`);
+                this.liveOpenPosition = { epoch: this.currentSlot.epoch, tokenId: this.currentTokens.down, side: "DOWN" };
+              }
+            });
+          }
+
+          const alert = formatEntryAlert({
+            slotEpoch: this.currentSlot.epoch,
+            slug: this.currentSlot.slug,
+            side: "DOWN",
+            strikePrice: effectivePriceToBeat,
+            spotPrice: effectiveSpot,
+            trueProbability: strategyResult.trueProbabilityDown,
+            expectedValueUsd: strategyResult.expectedValueDown,
+            netRoiPct: strategyResult.netEdgeDownPct,
+            entryPrice: downLeg.bestAsk,
+            shares,
+            totalCostUsd: parseFloat((shares * downLeg.bestAsk + fee).toFixed(2)),
+            realizedVol: dynamicVol,
+            secondsRemaining: this.currentSlot.secondsRemaining,
+          });
+          this.onAlert?.(alert);
+        }
+      }
+    }
+
+    const liveState: LiveEngineState = {
+      meta: {
+        snapshotId: "",
+        generatedAt: now,
+        bookSequence: 0,
+        slotEpoch: this.currentSlot.epoch,
+        source: this.transportSource,
+      },
+      slot: {
+        epoch: this.currentSlot.epoch,
+        slug: this.currentSlot.slug,
+        title: this.currentSlot.title,
+        conditionId: `cond-${this.currentSlot.epoch}`,
+        secondsRemaining: this.currentSlot.secondsRemaining,
+        progressPct: this.currentSlot.progressPct,
+        warmupPhase: this.currentSlot.warmupPhase,
+      },
+      safety,
+      signal: signals,
+      economics,
+      up: upLeg,
+      down: downLeg,
+      nextSlot: {
+        epoch: this.nextSlot.epoch,
+        slug: this.nextSlot.slug,
+        warmedUp: !this.nextUpBook.isEmpty() && !this.nextDownBook.isEmpty(),
+      },
+      strategy: {
+        ...strategyResult,
+        priceToBeat: this.priceToBeat,
+        currentSpot: this.currentSpot,
+      },
+      paperWallet: this.wallet.getStats(),
+    };
+
+    this.stateStore.writeState(liveState);
+    return liveState;
+  }
+
+  public start(intervalMs: number = 250): void {
+    if (this.tickInterval) clearInterval(this.tickInterval);
+    this.tickInterval = setInterval(() => {
+      this.updateState();
+    }, intervalMs);
+  }
+
+  public stop(): void {
+    if (this.tickInterval) clearInterval(this.tickInterval);
+    if (this.nodeWs) this.nodeWs.close();
+  }
+
+  /**
+   * Sells the currently tracked live position (if any) and clears it.
+   * Fire-and-forget, matching the existing liveTrader.placeMarketBuy calls.
+   */
+  private sellLivePosition(reason: string): void {
+    if (!this.liveOpenPosition) return;
+    const pos = this.liveOpenPosition;
+    this.liveOpenPosition = null;
+    liveTrader.sellAllShares(pos.tokenId).then((result) => {
+      if (!result.success) console.error(`[live-trader] SELL (${reason}) failed: ${result.error}`);
+      else console.log(`[live-trader] SELL (${reason}) order placed: ${result.orderId || "n/a"}`);
+    });
+  }
+}
