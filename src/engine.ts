@@ -141,15 +141,19 @@ export class MarketEngine {
     this.updateState();
   }
 
-  public setSpotPrices(spot: number, priceToBeat: number): void {
+  public setSpotPrices(spot: number, priceToBeat?: number, customNow?: number): void {
     this.currentSpot = spot;
-    this.priceToBeat = priceToBeat;
-    this.volatilityEstimator.recordPrice(spot);
-    this.updateState();
+    if (priceToBeat !== undefined && priceToBeat > 0) {
+      this.priceToBeat = priceToBeat;
+    }
+    this.volatilityEstimator.recordPrice(spot, customNow);
+    this.updateState(customNow);
   }
 
-  public updateState(): LiveEngineState {
-    const now = Date.now();
+  public updateState(customNow?: number): LiveEngineState {
+    const now = customNow || Date.now();
+    const oldEpoch = this.currentSlot?.epoch;
+    const oldSlug = this.currentSlot?.slug;
     this.currentSlot = this.scheduler.getCurrentSlot(now);
     this.nextSlot = this.scheduler.getNextSlot(now);
 
@@ -159,7 +163,8 @@ export class MarketEngine {
       },
       onRollover: (newCurrent) => {
         // Settle previous slot in paper wallet
-        const prevEpoch = this.currentSlot.epoch;
+        const prevEpoch = oldEpoch || (newCurrent.epoch - 300);
+        const prevSlug = oldSlug || `btc-updown-5m-${prevEpoch}`;
         const winner = this.currentSpot >= this.priceToBeat ? "UP" : "DOWN";
         const prevActive = this.wallet.getStats().activePositions.find(p => p.slotEpoch === prevEpoch);
         const slotPnl = this.wallet.settleSlot(prevEpoch, winner);
@@ -168,11 +173,14 @@ export class MarketEngine {
           const stats = this.wallet.getStats();
           const invested = prevActive.shares * prevActive.price + prevActive.fee;
           const retPct = invested > 0 ? parseFloat(((slotPnl / invested) * 100).toFixed(1)) : 0;
+          const isWin = prevActive.side === winner;
           const alert = formatSettlementAlert({
             slotEpoch: prevEpoch,
-            slug: this.currentSlot.slug,
-            won: prevActive.side === winner,
+            slug: prevSlug,
+            won: isWin,
             side: winner,
+            entryPrice: prevActive.price,
+            exitPrice: isWin ? 1.00 : 0.00,
             finalPrice: this.currentSpot,
             strikePrice: this.priceToBeat,
             netPnlUsd: slotPnl,
@@ -181,6 +189,9 @@ export class MarketEngine {
             winRatePct: stats.winRatePct,
             wins: stats.wins,
             losses: stats.losses,
+            reason: isWin
+              ? `Slot resolved ${winner} (Chainlink TWAP $${this.currentSpot.toLocaleString()} >= Strike $${this.priceToBeat.toLocaleString()}) • 100% Payout redeemed at $1.00/share`
+              : `Slot resolved ${winner} against open position • 0% payout`,
           });
           this.onAlert?.(alert);
         }

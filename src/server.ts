@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { StateStore } from "./state.js";
 import { TransportNormalizer, NormalizedEvent } from "./transport.js";
-import { DiscordWebhookPayload } from "./alerts.js";
+import { DiscordWebhookPayload, formatEntryAlert } from "./alerts.js";
 
 export const DISCORD_WEBHOOK_URL =
   process.env.DISCORD_WEBHOOK_URL ||
@@ -167,17 +167,24 @@ export function createServer(options: ServerOptions) {
 
   app.post("/api/alerts/test", (_req, res) => {
     if (options.emitAlert) {
-      options.emitAlert({
-        username: "Polymarket 5m Quant Sniper",
-        embeds: [
-          {
-            title: "🟢 DISCORD WEBHOOK TEST: QUANT ALERT SYSTEM ACTIVE",
-            color: 0x10B981,
-            description: "System alert channel established successfully! In/Out/PnL notifications will stream here live.",
-            timestamp: new Date().toISOString(),
-          }
-        ]
-      });
+      options.emitAlert(
+        formatEntryAlert({
+          slotEpoch: 1790175000,
+          slug: "btc-updown-5m-1790175000",
+          side: "UP",
+          strikePrice: 85400,
+          spotPrice: 85495,
+          trueProbability: 0.964,
+          expectedValueUsd: 0.076,
+          netRoiPct: 8.7,
+          entryPrice: 0.88,
+          shares: 170,
+          totalCostUsd: 150.86,
+          realizedVol: 0.54,
+          secondsRemaining: 40,
+          reason: "Test Signal Trigger: Sniper window active (40s left) • Model Win Probability 96.4% • Expected Value +$0.076/share • Drift +$95.00 USD safely exceeding $35.00 flash-wick buffer",
+        })
+      );
     }
     res.json({ ok: true });
   });

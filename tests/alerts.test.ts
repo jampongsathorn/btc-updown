@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { formatEntryAlert, formatStopLossAlert, formatSettlementAlert } from "../src/alerts";
 
 describe("Discord Alert Embed Formatter", () => {
-  it("should format rich IN (Entry) alert with full quantitative metrics", () => {
+  it("should format rich SIGNAL IN alert with (1) link, (2) amount, (3) bucket+price, (4) reason", () => {
     const payload = formatEntryAlert({
       slotEpoch: 1790170500,
       slug: "btc-updown-5m-1790170500",
@@ -20,15 +20,17 @@ describe("Discord Alert Embed Formatter", () => {
     });
 
     expect(payload.embeds).toBeDefined();
-    expect(payload.embeds[0].title).toContain("ENTRY SIGNAL: BUY UP");
+    expect(payload.embeds[0].title).toContain("SIGNAL IN: BUY UP");
     expect(payload.embeds[0].color).toBe(0x10B981); // Emerald Green
     const desc = payload.embeds[0].description;
-    expect(desc).toContain("85,475.50");
+    expect(desc).toContain("**1. Market Link:** [🔗 View on Polymarket](https://polymarket.com/event/btc-updown-5m-1790170500)");
+    expect(desc).toContain("**2. Amount:** **120 Shares** (~$98.40 USD)");
+    expect(desc).toContain("**3. Bucket + Price:** `UP` @ **$0.82**");
+    expect(desc).toContain("**4. Reason:**");
     expect(desc).toContain("95.4%");
-    expect(desc).toContain("+$0.082");
   });
 
-  it("should format rich OUT (Stop-Loss) alert with capital preservation", () => {
+  it("should format rich STOP LOSS alert with (1) link, (2) price in/out, (3) pnl $ and %, (4) reason", () => {
     const payload = formatStopLossAlert({
       slotEpoch: 1790170500,
       slug: "btc-updown-5m-1790170500",
@@ -43,18 +45,23 @@ describe("Discord Alert Embed Formatter", () => {
       reason: "Spot reversed near strike ($Delta: +$3.0)",
     });
 
-    expect(payload.embeds[0].title).toContain("STOP-LOSS EXIT");
+    expect(payload.embeds[0].title).toContain("STOP LOSS: LIQUIDATED EARLY");
     expect(payload.embeds[0].color).toBe(0xFE8761); // Orange
-    expect(payload.embeds[0].description).toContain("74.1%");
-    expect(payload.embeds[0].description).toContain("$22.00");
+    const desc = payload.embeds[0].description;
+    expect(desc).toContain("**1. Market Link:** [🔗 View on Polymarket](https://polymarket.com/event/btc-updown-5m-1790170500)");
+    expect(desc).toContain("**2. Price IN ➔ Price OUT:** IN **$0.85** ➔ OUT **$0.65**");
+    expect(desc).toContain("**3. PnL Dollar & %:** **-$22.00 USD**");
+    expect(desc).toContain("**4. Reason:** Spot reversed near strike");
   });
 
-  it("should format rich PNL (Settlement) alert with win/loss details", () => {
+  it("should format rich WIN alert with (1) link, (2) price in/out, (3) pnl $ and %, (4) reason", () => {
     const payload = formatSettlementAlert({
       slotEpoch: 1790170500,
       slug: "btc-updown-5m-1790170500",
       won: true,
       side: "UP",
+      entryPrice: 0.88,
+      exitPrice: 1.00,
       finalPrice: 85490,
       strikePrice: 85400,
       netPnlUsd: 18.20,
@@ -63,11 +70,15 @@ describe("Discord Alert Embed Formatter", () => {
       winRatePct: 96.0,
       wins: 12,
       losses: 0,
+      reason: "Slot resolved UP (Chainlink TWAP $85,490.00 >= Strike $85,400.00) • 100% Payout redeemed at $1.00/share",
     });
 
-    expect(payload.embeds[0].title).toContain("MARKET SETTLED: WIN");
-    expect(payload.embeds[0].color).toBe(0x3B82F6); // Blue
-    expect(payload.embeds[0].description).toContain("+$18.20");
-    expect(payload.embeds[0].description).toContain("96.0%");
+    expect(payload.embeds[0].title).toContain("WIN: MARKET RESOLVED & SETTLED");
+    expect(payload.embeds[0].color).toBe(0x22C55E); // Green
+    const desc = payload.embeds[0].description;
+    expect(desc).toContain("**1. Market Link:** [🔗 View on Polymarket](https://polymarket.com/event/btc-updown-5m-1790170500)");
+    expect(desc).toContain("**2. Price IN ➔ Price OUT:** IN **$0.88** ➔ OUT **$1.00**");
+    expect(desc).toContain("**3. PnL Dollar & %:** **+$18.20 USD** (**+18.2%**)");
+    expect(desc).toContain("**4. Reason:** Slot resolved UP");
   });
 });

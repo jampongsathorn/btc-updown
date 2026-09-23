@@ -738,13 +738,13 @@
           // 3. Update Web UI Alert Banner
           const embed = item.payload.embeds?.[0];
           if (embed) {
-            updateAlertBanner(embed.title, embed.description, embed.color);
+            updateAlertBanner(embed.title, embed.description, embed.color, embed.url);
           }
         }
       } catch (err) {}
     }
 
-    function updateAlertBanner(title, desc, colorHex) {
+    function updateAlertBanner(title, desc, colorHex, url) {
       const banner = document.getElementById("live-alert-banner");
       const titleEl = document.getElementById("alert-title");
       const subEl = document.getElementById("alert-subtitle");
@@ -752,17 +752,25 @@
       const iconEl = document.getElementById("alert-icon");
 
       titleEl.innerText = title;
-      subEl.innerText = desc.split("\n\n")[0] || desc;
       timeEl.innerText = new Date().toLocaleTimeString();
 
-      if (title.includes("ENTRY")) {
+      // Format description with highlighted markdown styling
+      let formattedHtml = desc
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#fff;">$1</strong>')
+        .replace(/`([^`]+)`/g, '<code style="background:rgba(192,229,237,0.15); color:var(--light-blue-tint); padding:2px 6px; border-radius:4px; font-size:12px;">$1</code>')
+        .replace(/\[🔗 View on Polymarket\]\((.*?)\)/g, '<a href="$1" target="_blank" style="color:var(--orange-highlight); font-weight:700; text-decoration:underline;">🔗 Open Polymarket Event ↗</a>')
+        .replace(/\n/g, '<br/>');
+
+      subEl.innerHTML = `<div style="margin-top:6px; line-height:1.6; font-size:12px;">${formattedHtml}</div>`;
+
+      if (title.includes("SIGNAL IN") || title.includes("ENTRY")) {
         banner.style.borderLeftColor = "var(--green)";
         iconEl.innerText = "🚀";
-      } else if (title.includes("STOP-LOSS")) {
+      } else if (title.includes("STOP LOSS") || title.includes("STOP-LOSS")) {
         banner.style.borderLeftColor = "var(--orange-highlight)";
         iconEl.innerText = "🛡️";
-      } else if (title.includes("SETTLED")) {
-        banner.style.borderLeftColor = "var(--blue-accent)";
+      } else if (title.includes("WIN") || title.includes("SETTLED")) {
+        banner.style.borderLeftColor = "var(--green)";
         iconEl.innerText = "🏆";
       }
     }
