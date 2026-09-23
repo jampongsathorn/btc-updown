@@ -8,6 +8,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prove": "tsx scripts/prove-strategy.ts",
     "start": "tsx src/index.ts",
     "signal": "tsx src/cli.ts signal",
     "log": "tsx src/cli.ts log"
