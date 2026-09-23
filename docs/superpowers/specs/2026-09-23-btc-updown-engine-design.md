@@ -1,7 +1,7 @@
 # Specification: Auto-Rolling Market Engine & Real-Time Signal System for Polymarket 5m BTC Up/Down
 
 **Date:** 2026-09-23  
-**Status:** Approved for Implementation  
+**Status:** Approved for Implementation (v1.1 Refined)  
 **Target:** Polymarket 5-minute recurring BTC Up/Down series (`btc-up-or-down-5m`)
 
 ---
@@ -10,78 +10,38 @@
 
 The goal is to provide an ultra-reliable, real-time market data and signal engine for autonomous trading agents operating on Polymarket's recurring 5-minute Bitcoin Up/Down markets (`btc-updown-5m-<EPOCH>`). 
 
-The engine must solve four core challenges:
+The engine solves four core challenges:
 1. **Dynamic Slot Rollover:** Automatically discover, pre-warm, and transition between 5-minute market contracts with zero dropped ticks.
 2. **Dual-Environment Transport:** Function identically in sandbox environments (via Browser WebSocket Relay) and production/local machines (via direct Node.js WebSocket).
 3. **Executable Economics (Fees & Depth Slippage):** Compute net-of-fee, depth-weighted execution prices rather than naive mid/spread indicators.
-4. **Fail-Closed Safety:** Guard the trading agent with comprehensive health checks (stale book detection, crossed books, disconnected feeds, unverified fee models).
+4. **Explicit Decoupling of Signals vs. Trade Permission (Fail-Closed Safety):** Cleanly separate opportunity detection (`signal`) from execution authorization (`safety` / `permissionToTrade`) so debugging and risk management are transparent.
 
 ---
 
-## 2. Layered Architecture
+## 2. Refined Layered Architecture
 
 ```
-                               ┌──────────────────────────────────────────────┐
-                               │       Polymarket Public Infrastructure       │
-                               │  • Gamma API (Market metadata, fees, tokens) │
-                               │  • CLOB WebSocket (Live books, price_change) │
-                               └──────────────────────┬───────────────────────┘
-                                                      │
-             ┌────────────────────────────────────────┴────────────────────────────────────────┐
-             ▼ (Local / Production)                                                            ▼ (Sandbox Preview)
-┌───────────────────────────────┐                                              ┌───────────────────────────────┐
-│     Node.js Direct WS         │                                              │      Browser Relay Adapter    │
-│  `wss://ws-subscriptions-...` │                                              │  Direct client-side WS in UI  │
-│  Automatic 10s PING keepalive │                                              │  Pushes raw events via HTTP   │
-└──────────────┬────────────────┘                                              └───────────────┬───────────────┘
-               │                                                                               │
-               └──────────────────────────────────────┬────────────────────────────────────────┘
-                                                      │ Raw Event Stream
-                                                      ▼
-                                       ┌─────────────────────────────┐
-                                       │    1. Transport Normalizer  │
-                                       │   Extracts book, tick, diff │
-                                       └──────────────┬──────────────┘
-                                                      │
-                                                      ▼
-                                       ┌─────────────────────────────┐
-                                       │    2. Orderbook Engine      │
-                                       │   Maintains L2 Bids & Asks  │
-                                       │   CURRENT slot + NEXT slot  │
-                                       └──────────────┬──────────────┘
-                                                      │
-                                                      ▼
-                                       ┌─────────────────────────────┐
-                                       │    3. Market Validation     │
-                                       │   Crossed book check        │
-                                       │   Staleness & heartbeat     │
-                                       │   Incomplete legs check     │
-                                       └──────────────┬──────────────┘
-                                                      │ Validated Books
-                                                      ▼
-                                       ┌─────────────────────────────┐
-                                       │    4. Signals & Parity      │
-                                       │   Mid Parity (Up + Down)    │
-                                       │   Bid/Ask Depth Imbalance   │
-                                       │   Micro-price & Spread      │
-                                       └──────────────┬──────────────┘
-                                                      │
-                                                      ▼
-                                       ┌─────────────────────────────┐
-                                       │   5. Executable Economics   │
-                                       │   Dynamic Gamma fee model   │
-                                       │   BuyBoth / SellBoth Edge   │
-                                       │   Effective Net Price/Depth │
-                                       └──────────────┬──────────────┘
-                                                      │
-                               ┌──────────────────────┴──────────────────────┐
-                               ▼                                             ▼
-                ┌─────────────────────────────┐               ┌─────────────────────────────┐
-                │       State Publisher       │               │      Live Web Preview       │
-                │  Writes `state/live.json`   │               │  `http://0.0.0.0:3000`      │
-                │  Atomic file write on tick  │               │  Real-time orderbook, tick  │
-                │  Exposes CLI: `npm run ...` │               │  chart, countdown, metrics  │
-                └─────────────────────────────┘               └─────────────────────────────┘
+Transport (Node WS / Browser Relay)
+   ↓
+Normalized Orderbooks (L2 Bids/Asks)
+   ↓
+Current + Next Slot Manager (Dual-Slot Handover, WARMUP_SECONDS)
+   ↓
+Market / Fee Validation (Authoritative Gamma Fee Parsing)
+   ↓
+Executable Economics (Depth-walked slippage, Net Edge)
+   ↓
+Signal Analytics (Tri-Parity, Imbalance, Micro-Price)
+   ↓
+Safety Guard (Fail-closed check, MAX_BOOK_AGE_MS)
+   ↓
+Atomic Snapshot (`state/live.json` with snapshotId, bookSequence)
+   ↓
+Agent Decision Loop
+   ↓
+Execution Guard (Pre-flight invariant check immediately prior to order submission)
+   ↓
+Order Execution (ClobClient EIP-712 / L2 HMAC)
 ```
 
 ---
@@ -92,50 +52,59 @@ The engine must solve four core challenges:
 
 ```typescript
 export interface LiveEngineState {
-  timestamp: number;                  // System epoch ms
+  meta: {
+    snapshotId: string;               // Monotonic UUID / counter per write
+    generatedAt: number;              // Unix epoch ms
+    bookSequence: number;             // Total ticks processed
+    slotEpoch: number;                // Primary slot start epoch seconds (e.g. 1790158800)
+    source: "node-ws" | "browser-relay" | "idle";
+  };
   slot: {
-    epoch: number;                    // Slot start epoch seconds (e.g. 1790158800)
+    epoch: number;
     slug: string;                     // btc-updown-5m-1790158800
     title: string;
     conditionId: string;
     secondsRemaining: number;
     progressPct: number;
-    warmupPhase: boolean;             // True if currently inside WARMUP_SECONDS
+    warmupPhase: boolean;             // True if within WARMUP_SECONDS of boundary
   };
-  health: {
-    connected: boolean;
-    source: "node-ws" | "browser-relay" | "idle";
+  safety: {
+    failClosed: boolean;              // True if any safety rule triggers NO_TRADE
+    canTrade: boolean;                // Explicit permission: true only when failClosed === false
+    reasons: SafetyViolationReason[]; // Detailed violation codes for clean debugging
     bookAgeMs: number;
-    lastSequence: number;
-    currentReady: boolean;
-    nextReady: boolean;
+    maxBookAgeMsConfig: number;       // Configured threshold (e.g., 2500ms)
+    connected: boolean;
     crossedBook: boolean;
     stale: boolean;
+    currentReady: boolean;
+    nextReady: boolean;
     feeModelVerified: boolean;
-    failClosed: boolean;              // True if ANY safety rule triggers NO_TRADE
-    failClosedReasons: string[];
   };
-  up: OrderbookLeg;
-  down: OrderbookLeg;
-  parity: {
+  signal: {
     midParity: number;                // up.mid + down.mid
     buyBothCost: number;              // up.bestAsk + down.bestAsk
     buyBothGrossEdge: number;         // 1 - buyBothCost
     sellBothValue: number;            // up.bestBid + down.bestBid
     sellBothGrossEdge: number;        // sellBothValue - 1
     executableDepthShares: number;    // min(up.askDepthShares, down.askDepthShares)
+    buyBothNetEdge: number;           // grossEdge - totalTakerFees
+    imbalanceUp: number;              // (bidVol - askVol) / (bidVol + askVol)
+    imbalanceDown: number;
   };
   economics: {
     feeSchedule: {
-      rate: number;                   // e.g. 0.07 from Gamma
-      exponent: number;               // e.g. 1
+      rate: number;                   // Dynamically fetched from Gamma (e.g., 0.07)
+      exponent: number;
       takerOnly: boolean;
-      rebateRate: number;             // e.g. 0.20
+      rebateRate: number;             // e.g., 0.20 maker rebate
     };
     buyUp: ExecutionScenario;
     buyDown: ExecutionScenario;
     buyBothArbitrage: ArbitrageScenario;
   };
+  up: OrderbookLeg;
+  down: OrderbookLeg;
   nextSlot?: {
     epoch: number;
     slug: string;
@@ -147,6 +116,14 @@ export interface LiveEngineState {
   };
 }
 
+export type SafetyViolationReason =
+  | "FEED_DISCONNECTED"
+  | "BOOK_STALE"
+  | "CROSSED_BOOK"
+  | "INCOMPLETE_LEGS"
+  | "FEE_MODEL_UNVERIFIED"
+  | "SLOT_TRANSITION_DESYNC";
+
 export interface OrderbookLeg {
   tokenId: string;
   bestBid: number;
@@ -157,14 +134,14 @@ export interface OrderbookLeg {
   askDepthTotalUsd: number;
   bidTopSize: number;
   askTopSize: number;
-  imbalance: number;                 // (bidVol - askVol) / (bidVol + askVol)
+  imbalance: number;
   bids: [price: number, size: number][];
   asks: [price: number, size: number][];
 }
 
 export interface ExecutionScenario {
   marketPrice: number;
-  benchmarkShares: number;           // e.g. 100 shares
+  benchmarkShares: number;
   grossCostUsd: number;
   estimatedTakerFeeUsd: number;
   effectivePricePerShare: number;
@@ -185,64 +162,56 @@ export interface ArbitrageScenario {
 
 ## 4. Key Subsystems & Specifications
 
-### 4.1 Slot Scheduler & Rollover Engine (`src/scheduler.ts`)
+### 4.1 Configurable Parameters
+All thresholds are runtime-configurable (via environment variables or config object) rather than hardcoded:
+- `WARMUP_SECONDS` (Default: `45`): Pre-discovery and dual-subscription window before slot boundary.
+- `MAX_BOOK_AGE_MS` (Default: `2500`): Maximum milliseconds since last tick before the book is classified as stale.
+- `BENCHMARK_SHARES` (Default: `100`): Reference size used for depth-walked slippage and fee calculations.
+- `PORT` (Default: `3000`): Web preview and relay server port.
+
+### 4.2 Slot Scheduler & Dual-Slot Manager (`src/scheduler.ts`)
 - **Formula:** `slotEpoch = Math.floor(now / 300) * 300`.
-- **Configurable Warm-up:** `WARMUP_SECONDS` defaults to `45` (configurable via `process.env.WARMUP_SECONDS`).
 - **Rollover Lifecycle:**
-  1. **Active Phase ($300\text{s} \dots 45\text{s}$ remaining):** Engine tracks active `current` market.
-  2. **Warmup Phase ($45\text{s} \dots 0\text{s}$ remaining):**
+  1. **Active Phase ($300\text{s} \dots \text{WARMUP\_SECONDS}$ remaining):** Engine tracks active `current` market.
+  2. **Warmup Phase ($\text{WARMUP\_SECONDS} \dots 0\text{s}$ remaining):**
      - Queries Gamma API for `slotEpoch + 300` metadata (`conditionId`, `clobTokenIds`, `feeSchedule`).
      - Issues dynamic WebSocket `subscribe` for the next Up and Down tokens.
      - Maintains dual in-memory orderbooks (`current` and `next`).
   3. **Boundary Execution ($T = 0$):**
      - Atomically promotes `next` $\rightarrow$ `current`.
-     - Issues WebSocket `unsubscribe` for the expired slot tokens.
-     - Schedules the next discovery cycle.
+     - Issues WebSocket `unsubscribe` for expired slot tokens.
+     - Resets state sequence and updates primary `slotEpoch`.
 
-### 4.2 Orderbook & Transport Layer (`src/orderbook.ts`, `src/relay.ts`)
-- **Single Source of Truth:** Regardless of whether messages arrive from direct Node WebSocket or Browser Relay, messages are parsed and routed into a unified `Orderbook` class.
-- **L2 Book Maintenance:** Handles full snapshots (`book`), incremental price changes (`price_change`), and top-of-book updates (`best_bid_ask`).
-- **Heartbeat Daemon:** Sends `"PING"` text frames every 10,000 ms; drops and reconnects if no message or `"PONG"` is received within 15,000 ms.
+### 4.3 Orderbook Normalizer & Transport Layer (`src/orderbook.ts`, `src/relay.ts`)
+- **Single Source of Truth:** Direct Node.js WebSocket and Browser Relay pass raw frames to the same backend normalizer.
+- **L2 Book Maintenance:** Full snapshot handling (`book`), delta updates (`price_change`), and top-of-book updates (`best_bid_ask`).
+- **Heartbeat Daemon:** Sends `"PING"` every 10s; marks disconnected and triggers reconnect if no pong within 15s.
 
-### 4.3 Validation & Safety Guard ("Fail-Closed") (`src/validator.ts`)
-A trade signal is tagged `failClosed = true` (blocking agent trading) if any of the following occur:
-1. `stale == true`: The most recent orderbook tick is older than `BOOK_STALENESS_THRESHOLD_MS` (default `2500ms`).
-2. `crossedBook == true`: `bestBid >= bestAsk` on either leg.
-3. `disconnected == true`: WebSocket transport is disconnected.
-4. `incompleteLegs == true`: Either the Up or Down token has an empty orderbook.
-5. `feeModelVerified == false`: Gamma fee schedule could not be fetched or verified against the contract rules.
+### 4.4 Decoupled Safety Guard & Pre-Flight Execution Guard (`src/validator.ts`)
+- **Fail-Closed Rule:** Safety guard evaluates:
+  1. `now - generatedAt > MAX_BOOK_AGE_MS` $\rightarrow$ `BOOK_STALE`
+  2. `bestBid >= bestAsk` on either leg $\rightarrow$ `CROSSED_BOOK`
+  3. `!connected` $\rightarrow$ `FEED_DISCONNECTED`
+  4. Empty bids or asks on either leg $\rightarrow$ `INCOMPLETE_LEGS`
+  5. Missing fee schedule from Gamma $\rightarrow$ `FEE_MODEL_UNVERIFIED`
+- If any reason triggers:
+  - `safety.failClosed = true`
+  - `safety.canTrade = false`
+- **Execution Guard:** Autonomous trading modules must call `assertCanTrade(snapshot)` immediately before submitting an order to confirm the book hasn't shifted or expired during deliberation.
 
-### 4.4 Executable Economics Calculator (`src/economics.ts`)
-- Parses authoritative `feeSchedule` from Gamma API:
-  - If `feeSchedule.takerOnly` is true, maker limit orders incur 0% taker fee and accrue `rebateRate` (e.g. 20%).
-  - Taker fees are calculated based on contract formula `rate * (price * (1 - price))^exponent` or linear rate depending on contract config.
-- Computes depth-walked slippage: For a benchmark trade size (e.g. 50, 100 shares), it walks the ask book ladder to return real weighted average fill price + estimated fee.
-- Arbitrage net edge: Deducts taker fees from gross parity edge:
-  $$\text{Net Edge} = (1.00 - (\text{Ask}_{\text{Up}} + \text{Ask}_{\text{Down}})) - (\text{Fee}_{\text{Up}} + \text{Fee}_{\text{Down}})$$
-
----
-
-## 5. User & Agent Interfaces
-
-1. **Agent CLI (`npm run signal` / `node dist/cli.js signal`):**
-   - Reads `state/live.json` directly from memory/disk in $<2\text{ms}$.
-   - Supports `--json` flag for machine consumption and formatted terminal table for human viewing.
-   - Prints clear `[TRADE READY]` or `[FAIL CLOSED: <REASONS>]` status.
-
-2. **Web Preview Dashboard (`http://0.0.0.0:3000`):**
-   - Clean, dark-mode terminal-aesthetic UI.
-   - Visual 5-minute countdown progress ring.
-   - Dual orderbook visualizer (Up vs Down with bid/ask depth bars).
-   - Real-time tick stream and executable economics summary.
-   - Browser relay connection indicator showing active data transport mode.
+### 4.5 Executable Economics Calculator (`src/economics.ts`)
+- Dynamically parses the authoritative fee schedule from Gamma API.
+- Walks the orderbook depth ladder for realistic average execution prices (slippage + fee).
+- Computes `buyBothNetEdge`: Gross edge minus dynamic taker fees for both legs.
 
 ---
 
-## 6. Implementation Plan & Milestones
+## 5. Performance Targets & User Interfaces
 
-1. **Package Setup & Project Structure:** Node.js, TypeScript, Vite/Express backend, ws, fast atomic writer.
-2. **Orderbook & Normalizer Engine:** In-memory orderbook data structure, snapshot/delta apply, crossed-book detection.
-3. **Gamma & CLOB Client:** Slot resolution, metadata fetcher, dual-mode WebSocket (Node + Browser Relay).
-4. **Economics & Signal Calculator:** Tri-parity, depth slippage, fee schedule calculation, fail-closed validator.
-5. **CLI & Web Dashboard:** Full UI preview on port 3000 and CLI agent commands.
-6. **Integration Verification:** End-to-end tests verifying slot rollovers, book leveling, and signal accuracy.
+- **Performance Target:** Local cache read p95 < 2ms (correctness and freshness prioritized over pure micro-benchmark speed).
+- **Agent CLI (`npm run signal`):** Outputs structured JSON or formatted terminal table with clear `[CAN_TRADE: true]` or `[CAN_TRADE: false (REASONS)]`.
+- **Web Preview Dashboard (`http://0.0.0.0:3000`):**
+  - Dark-mode terminal styling.
+  - Visual 5-minute countdown ring with warmup indicator.
+  - Live L2 depth bars for Up and Down legs.
+  - Real-time economics, arbitrage edges, and safety status display.
