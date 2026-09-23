@@ -1,4 +1,4 @@
-import { ClobClient, Side, Chain } from "@polymarket/clob-client";
+import { ClobClient, Side, Chain, AssetType } from "@polymarket/clob-client";
 import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
@@ -96,6 +96,49 @@ export class LiveTrader {
       });
       const result = await this.client!.postOrder(order);
       return { success: true, orderId: result?.orderID, raw: result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Places a real market SELL order for a fixed number of shares on the given token.
+   * shares is a share count (not dollars) - see UserMarketOrder.amount in the
+   * clob-client types: "SELL orders: Shares to sell".
+   */
+  public async placeMarketSell(tokenId: string, shares: number): Promise<LiveOrderResult> {
+    try {
+      await this.ensureInitialized();
+      const order = await this.client!.createMarketOrder({
+        tokenID: tokenId,
+        amount: shares,
+        side: Side.SELL,
+      });
+      const result = await this.client!.postOrder(order);
+      return { success: true, orderId: result?.orderID, raw: result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Sells the entire held balance of a token. Used for exits (stop-loss and
+   * slot-end auto-exit) since the exact filled share count from the earlier
+   * buy isn't tracked locally - this asks the CLOB for the real balance
+   * instead of relying on an estimate.
+   */
+  public async sellAllShares(tokenId: string): Promise<LiveOrderResult> {
+    try {
+      await this.ensureInitialized();
+      const balanceResp = await this.client!.getBalanceAllowance({
+        asset_type: AssetType.CONDITIONAL,
+        token_id: tokenId,
+      });
+      const shares = parseFloat(balanceResp.balance) / 1_000_000;
+      if (!(shares > 0)) {
+        return { success: true, error: "no shares held, nothing to sell" };
+      }
+      return this.placeMarketSell(tokenId, shares);
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
     }

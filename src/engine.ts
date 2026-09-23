@@ -73,6 +73,10 @@ export class MarketEngine {
   private transportSource: "node-ws" | "browser-relay" | "idle" = "idle";
   private tickInterval: NodeJS.Timeout | null = null;
   private onAlert?: (payload: DiscordWebhookPayload) => void;
+  // Tracks the live (real-money) position opened via liveTrader.placeMarketBuy,
+  // so it can be sold on stop-loss or at slot end. Paper-wallet positions are
+  // tracked separately in this.wallet and are unaffected by this.
+  private liveOpenPosition: { epoch: number; tokenId: string; side: "UP" | "DOWN" } | null = null;
 
   constructor(options?: EngineOptions) {
     this.config = options?.config || DEFAULT_CONFIG;
@@ -197,6 +201,14 @@ export class MarketEngine {
         const winner = this.currentSpot >= this.priceToBeat ? "UP" : "DOWN";
         const prevActive = this.wallet.getStats().activePositions.find(p => p.slotEpoch === prevEpoch);
         const slotPnl = this.wallet.settleSlot(prevEpoch, winner);
+
+        // Auto-exit any live (real-money) position at slot end, right as the
+        // scheduler crosses the slot's end unix timestamp - don't hold real
+        // shares into on-chain resolution/redemption, which this bot doesn't
+        // implement.
+        if (isLiveTradingEnabled() && this.liveOpenPosition && this.liveOpenPosition.epoch === prevEpoch) {
+          this.sellLivePosition("SLOT_END");
+        }
 
         if (prevActive) {
           const stats = this.wallet.getStats();
@@ -334,6 +346,7 @@ export class MarketEngine {
       const savedPct = invested > 0 ? (recovered / invested) * 100 : 0;
 
       this.wallet.closeEarly(this.currentSlot.epoch, exitBid, exitFee, "STOP_LOSS");
+      if (isLiveTradingEnabled()) this.sellLivePosition("STOP_LOSS");
 
       const alert = formatStopLossAlert({
         slotEpoch: this.currentSlot.epoch,
@@ -366,7 +379,10 @@ export class MarketEngine {
             const usdAmount = parseFloat((shares * upLeg.bestAsk + fee).toFixed(2));
             liveTrader.placeMarketBuy(this.currentTokens.up, usdAmount).then((result) => {
               if (!result.success) console.error(`[live-trader] BUY_UP order failed: ${result.error}`);
-              else console.log(`[live-trader] BUY_UP order placed: ${result.orderId}`);
+              else {
+                console.log(`[live-trader] BUY_UP order placed: ${result.orderId}`);
+                this.liveOpenPosition = { epoch: this.currentSlot.epoch, tokenId: this.currentTokens.up, side: "UP" };
+              }
             });
           }
 
@@ -401,7 +417,10 @@ export class MarketEngine {
             const usdAmount = parseFloat((shares * downLeg.bestAsk + fee).toFixed(2));
             liveTrader.placeMarketBuy(this.currentTokens.down, usdAmount).then((result) => {
               if (!result.success) console.error(`[live-trader] BUY_DOWN order failed: ${result.error}`);
-              else console.log(`[live-trader] BUY_DOWN order placed: ${result.orderId}`);
+              else {
+                console.log(`[live-trader] BUY_DOWN order placed: ${result.orderId}`);
+                this.liveOpenPosition = { epoch: this.currentSlot.epoch, tokenId: this.currentTokens.down, side: "DOWN" };
+              }
             });
           }
 
@@ -474,5 +493,19 @@ export class MarketEngine {
   public stop(): void {
     if (this.tickInterval) clearInterval(this.tickInterval);
     if (this.nodeWs) this.nodeWs.close();
+  }
+
+  /**
+   * Sells the currently tracked live position (if any) and clears it.
+   * Fire-and-forget, matching the existing liveTrader.placeMarketBuy calls.
+   */
+  private sellLivePosition(reason: string): void {
+    if (!this.liveOpenPosition) return;
+    const pos = this.liveOpenPosition;
+    this.liveOpenPosition = null;
+    liveTrader.sellAllShares(pos.tokenId).then((result) => {
+      if (!result.success) console.error(`[live-trader] SELL (${reason}) failed: ${result.error}`);
+      else console.log(`[live-trader] SELL (${reason}) order placed: ${result.orderId || "n/a"}`);
+    });
   }
 }
