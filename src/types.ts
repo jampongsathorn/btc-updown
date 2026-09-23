@@ -125,7 +125,7 @@ export interface LiveEngineState {
     expectedValueDown: number;
     netEdgeUpPct: number;
     netEdgeDownPct: number;
-    recommendedAction: "BUY_UP" | "BUY_DOWN" | "HOLD_NO_EDGE";
+    recommendedAction: "BUY_UP" | "BUY_DOWN" | "HOLD_NO_EDGE" | "STOP_LOSS_EXIT";
     reason: string;
     priceToBeat?: number;
     currentSpot?: number;

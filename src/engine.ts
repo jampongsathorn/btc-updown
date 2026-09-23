@@ -186,6 +186,8 @@ export class MarketEngine {
     const effectiveSpot = this.currentSpot || (this.priceToBeat ? this.priceToBeat * (1 + (upLeg.mid - 0.5) * 0.002) : 85000);
     const effectivePriceToBeat = this.priceToBeat || effectiveSpot;
 
+    const currentActivePos = this.wallet.getStats().activePositions.find(p => p.slotEpoch === this.currentSlot.epoch);
+
     const strategyResult = evaluateVarianceCollapse({
       currentSpot: effectiveSpot,
       priceToBeat: effectivePriceToBeat,
@@ -195,12 +197,16 @@ export class MarketEngine {
       downAsk: downLeg.bestAsk,
       downBid: downLeg.bestBid,
       takerFeeRate: this.feeSchedule.rate,
+      currentPosition: currentActivePos ? { side: currentActivePos.side, entryPrice: currentActivePos.price } : undefined,
     });
 
-    // Auto Paper Execution when EV > threshold and in sniper window
-    if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && safety.canTrade) {
-      const activeForSlot = this.wallet.getStats().activePositions.some(p => p.slotEpoch === this.currentSlot.epoch);
-      if (!activeForSlot) {
+    // Auto Paper Execution: Stop Loss Early Exit or Open Position
+    if (strategyResult.recommendedAction === "STOP_LOSS_EXIT" && currentActivePos) {
+      const exitBid = currentActivePos.side === "UP" ? upLeg.bestBid : downLeg.bestBid;
+      const exitFee = this.feeSchedule.rate * exitBid * (1 - exitBid) * currentActivePos.shares;
+      this.wallet.closeEarly(this.currentSlot.epoch, exitBid, exitFee, "STOP_LOSS");
+    } else if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && strategyResult.recommendedAction !== "STOP_LOSS_EXIT" && safety.canTrade) {
+      if (!currentActivePos) {
         if (strategyResult.recommendedAction === "BUY_UP" && upLeg.bestAsk > 0) {
           const shares = Math.min(50, upLeg.askTopSize || 50);
           const fee = this.feeSchedule.rate * upLeg.bestAsk * (1 - upLeg.bestAsk) * shares;

@@ -65,4 +65,39 @@ describe("Variance Collapse Quantitative Strategy", () => {
     expect(result.expectedValueDown).toBeGreaterThan(0.04);
     expect(result.recommendedAction).toBe("BUY_DOWN");
   });
+
+  it("should reject trade inside the flash-wick danger zone (drift < buffer)", () => {
+    // 30 seconds remaining, but drift is only +$12 (inside default $35 danger zone)
+    const result = evaluateVarianceCollapse({
+      currentSpot: 85462,
+      priceToBeat: 85450, // only +$12 drift
+      secondsRemaining: 30,
+      upAsk: 0.88,
+      upBid: 0.87,
+      downAsk: 0.15,
+      downBid: 0.14,
+      takerFeeRate: 0.07,
+      jumpSafetyBufferUsd: 35.0,
+    });
+
+    expect(result.recommendedAction).toBe("HOLD_NO_EDGE");
+    expect(result.reason).toContain("flash-wick danger zone");
+  });
+
+  it("should trigger STOP_LOSS_EXIT when open position drifts back towards strike", () => {
+    // We hold UP position bought at 0.85, but BTC reversed to only +$2 above strike
+    const result = evaluateVarianceCollapse({
+      currentSpot: 85452,
+      priceToBeat: 85450,
+      secondsRemaining: 25,
+      upAsk: 0.65,
+      upBid: 0.63,
+      downAsk: 0.38,
+      downBid: 0.36,
+      currentPosition: { side: "UP", entryPrice: 0.85 },
+    });
+
+    expect(result.recommendedAction).toBe("STOP_LOSS_EXIT");
+    expect(result.reason).toContain("Stop-loss triggered");
+  });
 });

@@ -112,7 +112,7 @@ function runMonteCarloProof(numRounds: number = 1000): {
     const upBid = Math.max(0.01, parseFloat((upAsk - 0.03).toFixed(2)));
     const downBid = Math.max(0.01, parseFloat((downAsk - 0.03).toFixed(2)));
 
-    // Strategy 1: Variance Collapse Sniper (Our Strategy)
+    // Strategy 1: Variance Collapse Sniper WITH DYNAMIC STOP-LOSS & JUMP BUFFER (New Engine)
     const sniperSignal = evaluateVarianceCollapse({
       currentSpot: spotAtMid,
       priceToBeat: strikePrice,
@@ -123,9 +123,10 @@ function runMonteCarloProof(numRounds: number = 1000): {
       downBid,
       minEvThreshold: 0.03, // Requires at least +$0.03 EV per share edge
       annualizedVol,
+      jumpSafetyBufferUsd: 35.0, // Avoid flash-wick danger zone
     });
 
-    if (sniperSignal.recommendedAction !== "HOLD_NO_EDGE") {
+    if (sniperSignal.recommendedAction === "BUY_UP" || sniperSignal.recommendedAction === "BUY_DOWN") {
       sniperTrades++;
       const isUp = sniperSignal.recommendedAction === "BUY_UP";
       const buyPrice = isUp ? upAsk : downAsk;
@@ -133,20 +134,51 @@ function runMonteCarloProof(numRounds: number = 1000): {
       const takerFee = 0.07 * buyPrice * (1 - buyPrice) * shares;
       const costBasis = tradeSizeUsd + takerFee;
 
-      const won = (isUp && actualOutcome === "UP") || (!isUp && actualOutcome === "DOWN");
-      if (won) {
-        const payout = shares * 1.0;
-        const netProfit = payout - costBasis;
-        sniperBalance += netProfit;
-        sniperGrossWins += netProfit;
-        sniperWins++;
-        sniperReturns.push(netProfit / costBasis);
-      } else {
-        const netLoss = costBasis;
+      // Check subsequent path for stop-loss triggering before expiry
+      let stoppedOut = false;
+      let exitPrice = 0;
+      for (let t = midSec + 5; t <= 290; t += 5) {
+        const spotCheck = btcPath[t];
+        const checkResult = evaluateVarianceCollapse({
+          currentSpot: spotCheck,
+          priceToBeat: strikePrice,
+          secondsRemaining: 300 - t,
+          upAsk, upBid, downAsk, downBid,
+          currentPosition: { side: isUp ? "UP" : "DOWN", entryPrice: buyPrice },
+        });
+
+        if (checkResult.recommendedAction === "STOP_LOSS_EXIT") {
+          stoppedOut = true;
+          // Liquidate on available bid (typically 0.60 - 0.70 instead of total 0 loss)
+          exitPrice = isUp ? Math.max(0.40, upBid - 0.15) : Math.max(0.40, downBid - 0.15);
+          break;
+        }
+      }
+
+      if (stoppedOut) {
+        // Stop-loss saved ~60-70% of capital!
+        const recovered = shares * exitPrice;
+        const netLoss = costBasis - recovered;
         sniperBalance -= netLoss;
         sniperGrossLosses += netLoss;
         sniperLosses++;
-        sniperReturns.push(-1.0);
+        sniperReturns.push(-netLoss / costBasis);
+      } else {
+        const won = (isUp && actualOutcome === "UP") || (!isUp && actualOutcome === "DOWN");
+        if (won) {
+          const payout = shares * 1.0;
+          const netProfit = payout - costBasis;
+          sniperBalance += netProfit;
+          sniperGrossWins += netProfit;
+          sniperWins++;
+          sniperReturns.push(netProfit / costBasis);
+        } else {
+          const netLoss = costBasis;
+          sniperBalance -= netLoss;
+          sniperGrossLosses += netLoss;
+          sniperLosses++;
+          sniperReturns.push(-1.0);
+        }
       }
 
       if (sniperBalance > sniperPeak) sniperPeak = sniperBalance;

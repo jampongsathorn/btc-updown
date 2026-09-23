@@ -66,6 +66,31 @@ export class PaperWallet {
     return position;
   }
 
+  public closeEarly(slotEpoch: number, exitPrice: number, exitFee: number = 0, reason: string = "STOP_LOSS"): number {
+    const active = this.positions.filter((p) => p.slotEpoch === slotEpoch);
+    if (active.length === 0) return 0;
+
+    let slotPnl = 0;
+    for (const pos of active) {
+      const invested = pos.shares * pos.price + pos.fee;
+      const recovered = pos.shares * exitPrice - exitFee;
+      const netLossOrGain = recovered - invested;
+
+      slotPnl += netLossOrGain;
+      this.balanceUsd += recovered;
+
+      if (netLossOrGain >= 0) {
+        this.wins++;
+      } else {
+        this.losses++;
+      }
+    }
+
+    this.realizedPnlUsd = parseFloat((this.realizedPnlUsd + slotPnl).toFixed(4));
+    this.positions = this.positions.filter((p) => p.slotEpoch !== slotEpoch);
+    return slotPnl;
+  }
+
   public settleSlot(slotEpoch: number, winningSide: "UP" | "DOWN"): number {
     const active = this.positions.filter((p) => p.slotEpoch === slotEpoch);
     if (active.length === 0) return 0;

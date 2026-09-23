@@ -58,4 +58,24 @@ describe("Paper Trading Simulation Wallet", () => {
     expect(stats.realizedPnlUsd).toBeCloseTo(-(50 * 0.88 + 0.35));
     expect(stats.winRatePct).toBe(0);
   });
+
+  it("should support closeEarly stop-loss to mitigate total loss", () => {
+    wallet.openPosition({
+      slotEpoch: 1790163900,
+      side: "UP",
+      shares: 100,
+      price: 0.88,
+      fee: 0.70, // total cost: $88.70
+    });
+
+    // Instead of waiting for $0 expiration loss, stop loss triggers at bid 0.65
+    // Recovered: 100 * 0.65 - 0.20 fee = $64.80
+    // Net loss: $64.80 - $88.70 = -$23.90 (Saved $64.80 compared to 100% loss!)
+    const pnl = wallet.closeEarly(1790163900, 0.65, 0.20, "STOP_LOSS");
+
+    expect(pnl).toBeCloseTo(-23.90);
+    expect(wallet.getStats().activePositions).toHaveLength(0);
+    expect(wallet.getStats().realizedPnlUsd).toBeCloseTo(-23.90);
+    expect(wallet.getStats().balanceUsd).toBeCloseTo(1000 - 23.90);
+  });
 });
