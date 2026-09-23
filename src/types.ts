@@ -139,5 +139,7 @@ export interface LiveEngineState {
     winRatePct: number;
     realizedPnlUsd: number;
     returnPct: number;
+    activePositions?: any[];
+    tradeHistory?: any[];
   };
 }

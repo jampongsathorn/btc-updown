@@ -18,12 +18,14 @@ export interface PaperStats {
   realizedPnlUsd: number;
   returnPct: number;
   activePositions: Position[];
+  tradeHistory: Position[];
 }
 
 export class PaperWallet {
   private balanceUsd: number;
   private initialUsd: number;
   private positions: Position[] = [];
+  private tradeHistory: Position[] = [];
   private totalTrades = 0;
   private wins = 0;
   private losses = 0;
@@ -59,6 +61,7 @@ export class PaperWallet {
     };
 
     this.positions.push(position);
+    this.tradeHistory.push(position);
     this.totalTrades++;
     return position;
   }
@@ -101,6 +104,7 @@ export class PaperWallet {
       realizedPnlUsd: parseFloat(this.realizedPnlUsd.toFixed(2)),
       returnPct,
       activePositions: [...this.positions],
+      tradeHistory: [...this.tradeHistory],
     };
   }
 }

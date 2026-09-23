@@ -3,196 +3,509 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Polymarket BTC UpDown 5m Engine</title>
+  <title>Polymarket BTC UpDown 5m — Quant Terminal</title>
   <style>
     :root {
-      --bg: #090d16;
-      --card-bg: #111827;
-      --border: #1f293d;
-      --text: #f3f4f6;
-      --text-dim: #9ca3af;
+      /* 80% / 20% / 10% Color System */
+      /* 80% Dominant: Deep Navy & Structure */
+      --bg-dark: #070e28;
+      --navy-header: #0C1846;
+      --card-bg: rgba(12, 24, 70, 0.7);
+      --border-blue: rgba(43, 93, 159, 0.4);
+
+      /* 20% Accent / Interactive / Secondary */
+      --blue-accent: #2B5D9F;
+      --light-blue-tint: #C0E5ED;
+      --text-muted: #8ba2c4;
+      --hover-row: rgba(192, 229, 237, 0.08);
+
+      /* 10% Focal Highlight / CTA / Trade Actions */
+      --orange-highlight: #FE8761;
+      --orange-glow: rgba(254, 135, 97, 0.25);
+
+      /* Status colors */
       --green: #10b981;
-      --green-bg: rgba(16, 185, 129, 0.1);
       --red: #ef4444;
-      --red-bg: rgba(239, 68, 68, 0.1);
-      --yellow: #f59e0b;
-      --cyan: #06b6d4;
-      --blue: #3b82f6;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
-    body { background-color: var(--bg); color: var(--text); padding: 20px; line-height: 1.5; }
-    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-    .title { font-size: 20px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; }
-    .badge { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-    .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
-    .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
-    .badge-yellow { background: rgba(245, 158, 11, 0.1); color: var(--yellow); border: 1px solid var(--yellow); }
-    
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
-    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-    .card-title { font-size: 13px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
-    
-    .timer-container { text-align: center; padding: 10px 0; }
-    .timer-val { font-size: 38px; font-weight: 800; color: var(--cyan); font-variant-numeric: tabular-nums; }
-    .progress-bar { width: 100%; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; margin-top: 10px; }
-    .progress-fill { height: 100%; background: var(--cyan); transition: width 0.3s; }
 
-    .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .stat-val { font-weight: 600; font-family: monospace; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace; }
+    body { background-color: var(--bg-dark); color: #fff; padding: 18px; line-height: 1.5; min-height: 100vh; }
     
-    .book-container { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-family: monospace; font-size: 13px; }
-    .book-side { display: flex; flex-direction: column; gap: 4px; }
-    .book-row { display: flex; justify-content: space-between; padding: 2px 6px; border-radius: 2px; }
-    .bid-row { background: rgba(16, 185, 129, 0.08); color: var(--green); }
-    .ask-row { background: rgba(239, 68, 68, 0.08); color: var(--red); }
+    /* Header (Navy: #0C1846) */
+    .header {
+      background: var(--navy-header);
+      border: 1px solid var(--blue-accent);
+      border-radius: 10px;
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--orange-highlight);
+      box-shadow: 0 0 12px var(--orange-highlight);
+    }
+    .brand-title { font-size: 19px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
+    .brand-subtitle { font-size: 12px; color: var(--light-blue-tint); margin-left: 8px; font-family: monospace; }
+    
+    .badge {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-cta {
+      background: var(--orange-highlight);
+      color: #0C1846;
+      box-shadow: 0 0 14px var(--orange-glow);
+    }
+    .badge-blue {
+      background: rgba(43, 93, 159, 0.3);
+      color: var(--light-blue-tint);
+      border: 1px solid var(--blue-accent);
+    }
+    .badge-red {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .badge-green {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
 
-    .pulse { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-    .pulse-green { background: var(--green); box-shadow: 0 0 8px var(--green); }
-    .pulse-yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+    /* Grid Layouts */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }
     
-    .footer { margin-top: 24px; font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-blue);
+      border-radius: 10px;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(43, 93, 159, 0.3);
+    }
+    .card-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--light-blue-tint);
+      font-weight: 600;
+    }
+
+    /* Chart Card */
+    .chart-card { margin-bottom: 18px; position: relative; }
+    .chart-container { position: relative; width: 100%; height: 280px; }
+    canvas { width: 100%; height: 100%; display: block; }
+    
+    .chart-legend {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-color { width: 12px; height: 3px; border-radius: 2px; }
+
+    /* Stats Rows */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .stat-row:hover { background: var(--hover-row); }
+    .stat-label { color: var(--text-muted); }
+    .stat-val { font-family: monospace; font-weight: 600; color: #fff; }
+    .stat-val.highlight { color: var(--orange-highlight); font-weight: 700; }
+    .stat-val.tint { color: var(--light-blue-tint); }
+
+    /* Timer Countdown */
+    .timer-wrap { text-align: center; padding: 6px 0; }
+    .timer-val { font-size: 42px; font-weight: 800; color: var(--light-blue-tint); font-variant-numeric: tabular-nums; }
+    .progress-bar { width: 100%; height: 6px; background: rgba(43, 93, 159, 0.3); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+    .progress-fill { height: 100%; background: var(--orange-highlight); transition: width 0.3s; }
+
+    /* Orderbook Ladder */
+    .book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-family: monospace; font-size: 13px; }
+    .book-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 8px;
+      border-radius: 3px;
+      margin-bottom: 2px;
+    }
+    .bid-row { background: rgba(16, 185, 129, 0.08); color: #34d399; }
+    .ask-row { background: rgba(239, 68, 68, 0.08); color: #f87171; }
+
+    /* Action Marker Log Table */
+    .action-badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--orange-highlight);
+      color: #0C1846;
+      display: inline-block;
+    }
+
+    .footer {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-blue);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      font-family: monospace;
+    }
+    a { color: var(--blue-accent); text-decoration: none; }
+    a:hover { color: var(--light-blue-tint); text-decoration: underline; }
   </style>
 </head>
 <body>
+
+  <!-- Header (Navy Background: #0C1846) -->
   <div class="header">
-    <div class="title">
-      <span class="pulse pulse-green" id="transport-pulse"></span>
-      Polymarket BTC UpDown 5m Signal Engine
+    <div class="brand">
+      <div class="brand-icon"></div>
+      <div class="brand-title">POLYMARKET BTC UPDOWN 5M</div>
+      <div class="brand-subtitle" id="slot-epoch-label">ENGINE ACTIVE</div>
     </div>
-    <div id="safety-badge" class="badge badge-yellow">INITIALIZING</div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <div id="safety-badge" class="badge badge-blue">CONNECTING</div>
+      <div id="action-badge" class="badge badge-cta" style="display: none;">NO TRADE ACTION</div>
+    </div>
   </div>
 
-  <div class="grid">
-    <!-- Slot Countdown Card -->
+  <!-- Real-time Time Series Chart with Action Markers -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <div class="card-title">Real-Time Market Dynamics & Execution Markers</div>
+      <div class="chart-legend">
+        <div class="legend-item"><div class="legend-color" style="background: var(--light-blue-tint);"></div><span>Up Token ($)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: var(--blue-accent);"></div><span>Down Token ($)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: rgba(254, 135, 97, 0.25); height: 10px;"></div><span>Sniper Window (&le;90s)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: var(--orange-highlight); width: 8px; height: 8px; border-radius: 50%;"></div><span style="color: var(--orange-highlight); font-weight: 700;">Action Marker (Buy/Sell)</span></div>
+      </div>
+    </div>
+    <div class="chart-container">
+      <canvas id="timeSeriesChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Top Metrics: Countdown & Quant Strategy -->
+  <div class="grid-2">
+    <!-- Slot Status -->
     <div class="card">
-      <div class="card-title">5-Minute Slot Status</div>
-      <div class="timer-container">
+      <div class="card-header">
+        <span class="card-title">5-Minute Slot Rollover Engine</span>
+        <span id="warmup-badge" class="badge badge-blue">SLOT ACTIVE</span>
+      </div>
+      <div class="timer-wrap">
         <div class="timer-val" id="timer">--:--</div>
-        <div style="font-size: 13px; color: var(--text-dim);" id="slot-slug">Resolving slot...</div>
+        <div style="font-size: 12px; color: var(--light-blue-tint);" id="slot-slug">Loading slot...</div>
         <div class="progress-bar"><div id="progress-fill" class="progress-fill" style="width: 0%;"></div></div>
       </div>
-      <div style="margin-top: 12px;">
-        <div class="stat-row"><span>Warmup Phase (<span id="warmup-sec">45</span>s):</span><span class="stat-val" id="warmup-status">Inactive</span></div>
-        <div class="stat-row"><span>Next Slot Pre-Warmed:</span><span class="stat-val" id="next-warmed">False</span></div>
+      <div style="margin-top: 14px;">
+        <div class="stat-row"><span class="stat-label">Baseline (priceToBeat):</span><span class="stat-val tint" id="price-to-beat">--</span></div>
+        <div class="stat-row"><span class="stat-label">Sniper Window Status:</span><span class="stat-val highlight" id="sniper-window-status">Inactive</span></div>
       </div>
     </div>
 
-    <!-- Arbitrage & Tri-Parity Economics -->
+    <!-- Variance Collapse Strategy -->
     <div class="card">
-      <div class="card-title">Tri-Parity & Executable Economics</div>
-      <div class="stat-row"><span>Mid Parity (Up + Down):</span><span class="stat-val" id="mid-parity">--</span></div>
-      <div class="stat-row"><span>Buy Both Cost (Ask Sum):</span><span class="stat-val" id="buy-both-cost">--</span></div>
-      <div class="stat-row"><span>Buy Both Gross Edge:</span><span class="stat-val" id="gross-edge">--</span></div>
-      <div class="stat-row"><span>Buy Both Net Edge (after fees):</span><span class="stat-val" id="net-edge">--</span></div>
-      <div class="stat-row"><span>Taker Fee Rate (Gamma):</span><span class="stat-val" id="fee-rate">7.0%</span></div>
-      <div class="stat-row"><span>Arbitrage Viable:</span><span class="stat-val" id="arb-viable" style="color: var(--yellow);">False</span></div>
+      <div class="card-header">
+        <span class="card-title" style="color: var(--orange-highlight);">Quantitative Strategy (Variance Collapse)</span>
+        <span id="strat-badge" class="badge badge-cta">EVALUATING</span>
+      </div>
+      <div class="stat-row"><span class="stat-label">Recommended Action:</span><span class="stat-val highlight" id="strat-action" style="font-size: 15px;">HOLD_NO_EDGE</span></div>
+      <div class="stat-row"><span class="stat-label">Model Probability p* (Up vs Down):</span><span class="stat-val tint" id="strat-probs">-- / --</span></div>
+      <div class="stat-row"><span class="stat-label">Net Expected Value (EV Up):</span><span class="stat-val" id="strat-ev-up">--</span></div>
+      <div class="stat-row"><span class="stat-label">Net Expected Value (EV Down):</span><span class="stat-val" id="strat-ev-down">--</span></div>
+      <div class="stat-row"><span class="stat-label">Diffusion Z-Score (&Delta; / &sigma;&tau;):</span><span class="stat-val" id="strat-z">--</span></div>
     </div>
   </div>
 
-  <!-- QUANTITATIVE STRATEGY & PAPER TRADING -->
-  <div class="grid" style="margin-bottom: 20px;">
+  <!-- Paper Wallet & Tri-Parity Economics -->
+  <div class="grid-2">
+    <!-- Paper Trading Simulation -->
     <div class="card">
-      <div class="card-title" style="color: var(--cyan);">Quantitative Strategy (Variance Collapse Sniper)</div>
-      <div class="stat-row"><span>Strategy Action:</span><span class="stat-val" id="strat-action" style="font-size: 15px; color: var(--yellow);">HOLD_NO_EDGE</span></div>
-      <div class="stat-row"><span>Model Probability Up (p*):</span><span class="stat-val" id="strat-prob-up">--%</span></div>
-      <div class="stat-row"><span>Model Probability Down (p*):</span><span class="stat-val" id="strat-prob-down">--%</span></div>
-      <div class="stat-row"><span>Expected Value (EV Up):</span><span class="stat-val" id="strat-ev-up">--</span></div>
-      <div class="stat-row"><span>Expected Value (EV Down):</span><span class="stat-val" id="strat-ev-down">--</span></div>
-      <div class="stat-row"><span>Confidence Z-Score:</span><span class="stat-val" id="strat-z">--</span></div>
+      <div class="card-header">
+        <span class="card-title">Paper Execution Wallet ($1,000 Starting)</span>
+        <span class="badge badge-blue" id="paper-trades-badge">0 TRADES</span>
+      </div>
+      <div class="stat-row"><span class="stat-label">Current Balance:</span><span class="stat-val highlight" id="paper-balance" style="font-size: 16px;">$1,000.00</span></div>
+      <div class="stat-row"><span class="stat-label">Realized Net PnL:</span><span class="stat-val" id="paper-pnl">$0.00 (+0.0%)</span></div>
+      <div class="stat-row"><span class="stat-label">Win Rate:</span><span class="stat-val tint" id="paper-winrate">0.0% (0W - 0L)</span></div>
+      <div class="stat-row"><span class="stat-label">Active Trade Position:</span><span class="stat-val highlight" id="paper-active">None</span></div>
     </div>
 
+    <!-- Tri-Parity & Arbitrage Economics -->
     <div class="card">
-      <div class="card-title" style="color: var(--green);">Paper Trading Simulation (Automated Execution)</div>
-      <div class="stat-row"><span>Virtual Balance:</span><span class="stat-val" id="paper-balance" style="font-size: 16px; color: var(--green);">$1,000.00</span></div>
-      <div class="stat-row"><span>Realized PnL:</span><span class="stat-val" id="paper-pnl">$0.00 (0.0%)</span></div>
-      <div class="stat-row"><span>Win Rate:</span><span class="stat-val" id="paper-winrate">0.0%</span></div>
-      <div class="stat-row"><span>Total Completed Trades:</span><span class="stat-val" id="paper-trades">0</span></div>
-      <div class="stat-row"><span>Active Slot Position:</span><span class="stat-val" id="paper-active">None</span></div>
+      <div class="card-header">
+        <span class="card-title">Executable Economics & Parity</span>
+        <span class="badge badge-blue">FEE 7.0%</span>
+      </div>
+      <div class="stat-row"><span class="stat-label">Mid Parity (Up.mid + Down.mid):</span><span class="stat-val tint" id="mid-parity">--</span></div>
+      <div class="stat-row"><span class="stat-label">Buy Both Cost (Ask Sum):</span><span class="stat-val" id="buy-both-cost">--</span></div>
+      <div class="stat-row"><span class="stat-label">Buy Both Gross Edge:</span><span class="stat-val" id="gross-edge">--</span></div>
+      <div class="stat-row"><span class="stat-label">Buy Both Net Edge (after fees):</span><span class="stat-val highlight" id="net-edge">--</span></div>
     </div>
   </div>
 
-  <div class="grid">
+  <!-- Orderbooks Grid -->
+  <div class="grid-2">
     <!-- UP TOKEN ORDERBOOK -->
     <div class="card">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-        <span class="card-title" style="color: var(--green);">UP TOKEN BOOK</span>
-        <span id="up-mid" style="font-weight: 700; color: var(--cyan);">Mid: --</span>
+      <div class="card-header">
+        <span class="card-title" style="color: var(--light-blue-tint);">UP TOKEN ORDERBOOK</span>
+        <span id="up-mid" style="font-weight: 700; color: #fff;">Mid: --</span>
       </div>
-      <div class="book-container">
-        <div class="book-side">
-          <div style="font-size: 11px; color: var(--text-dim); text-align: left;">BIDS</div>
+      <div class="book-grid">
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">BIDS (SIZE)</div>
           <div id="up-bids"></div>
         </div>
-        <div class="book-side">
-          <div style="font-size: 11px; color: var(--text-dim); text-align: right;">ASKS</div>
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted); text-align: right; margin-bottom: 4px;">ASKS (SIZE)</div>
           <div id="up-asks"></div>
         </div>
-      </div>
-      <div style="margin-top: 10px; font-size: 12px; color: var(--text-dim);">
-        Spread: <span id="up-spread" class="stat-val">--</span> | Imbalance: <span id="up-imbalance" class="stat-val">--</span>
       </div>
     </div>
 
     <!-- DOWN TOKEN ORDERBOOK -->
     <div class="card">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-        <span class="card-title" style="color: var(--red);">DOWN TOKEN BOOK</span>
-        <span id="down-mid" style="font-weight: 700; color: var(--cyan);">Mid: --</span>
+      <div class="card-header">
+        <span class="card-title" style="color: var(--blue-accent);">DOWN TOKEN ORDERBOOK</span>
+        <span id="down-mid" style="font-weight: 700; color: #fff;">Mid: --</span>
       </div>
-      <div class="book-container">
-        <div class="book-side">
-          <div style="font-size: 11px; color: var(--text-dim); text-align: left;">BIDS</div>
+      <div class="book-grid">
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">BIDS (SIZE)</div>
           <div id="down-bids"></div>
         </div>
-        <div class="book-side">
-          <div style="font-size: 11px; color: var(--text-dim); text-align: right;">ASKS</div>
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted); text-align: right; margin-bottom: 4px;">ASKS (SIZE)</div>
           <div id="down-asks"></div>
         </div>
-      </div>
-      <div style="margin-top: 10px; font-size: 12px; color: var(--text-dim);">
-        Spread: <span id="down-spread" class="stat-val">--</span> | Imbalance: <span id="down-imbalance" class="stat-val">--</span>
       </div>
     </div>
   </div>
 
+  <!-- Footer -->
   <div class="footer">
-    <div>Snapshot: <span id="snapshot-id">--</span> | Sequence: <span id="book-seq">0</span></div>
-    <div>Transport: <span id="transport-mode">Direct / Relay Active</span></div>
+    <div>Snapshot: <span id="snapshot-id" style="color: var(--light-blue-tint);">--</span> | Sequence: <span id="book-seq">0</span></div>
+    <div>Theme: 80% Navy (#0C1846) &bull; 20% Blue (#2B5D9F / #C0E5ED) &bull; 10% Orange Highlight (#FE8761)</div>
   </div>
 
   <script>
+    // Time Series Storage
+    const chartHistory = {
+      timestamps: [],
+      upPrices: [],
+      downPrices: [],
+      actions: [] // [{ timestamp, side, price, shares, slotEpoch }]
+    };
+
     let activeTokens = { current: [], next: [] };
     let polymarketWs = null;
+    let canvas, ctx;
 
-    // 1. Poll local backend state
+    window.addEventListener("DOMContentLoaded", () => {
+      canvas = document.getElementById("timeSeriesChart");
+      ctx = canvas.getContext("2d");
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+      setInterval(drawChart, 300);
+    });
+
+    function resizeCanvas() {
+      if (!canvas) return;
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+    }
+
+    // Chart Renderer with Action Markers
+    function drawChart() {
+      if (!ctx || !canvas) return;
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const count = chartHistory.timestamps.length;
+      if (count < 2) {
+        ctx.fillStyle = "#8ba2c4";
+        ctx.font = `${13 * window.devicePixelRatio}px monospace`;
+        ctx.textAlign = "center";
+        ctx.fillText("Waiting for real-time market ticks...", w / 2, h / 2);
+        return;
+      }
+
+      const paddingLeft = 50 * window.devicePixelRatio;
+      const paddingRight = 30 * window.devicePixelRatio;
+      const paddingTop = 25 * window.devicePixelRatio;
+      const paddingBottom = 30 * window.devicePixelRatio;
+
+      const plotW = w - paddingLeft - paddingRight;
+      const plotH = h - paddingTop - paddingBottom;
+
+      // Draw Grid & Y-Axis Labels
+      ctx.strokeStyle = "rgba(43, 93, 159, 0.25)";
+      ctx.lineWidth = 1 * window.devicePixelRatio;
+      ctx.fillStyle = "#8ba2c4";
+      ctx.font = `${10 * window.devicePixelRatio}px monospace`;
+      ctx.textAlign = "right";
+
+      for (let i = 0; i <= 5; i++) {
+        const val = (i * 0.2).toFixed(1);
+        const y = paddingTop + plotH - (i / 5) * plotH;
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, y);
+        ctx.lineTo(w - paddingRight, y);
+        ctx.stroke();
+        ctx.fillText(`$${val}`, paddingLeft - 8, y + 4 * window.devicePixelRatio);
+      }
+
+      // Sniper Window highlight band (&le; 90 seconds remaining -> roughly last 30% of chart)
+      const sniperStartIdx = Math.floor(count * 0.7);
+      if (sniperStartIdx < count) {
+        const xStart = paddingLeft + (sniperStartIdx / (count - 1)) * plotW;
+        ctx.fillStyle = "rgba(254, 135, 97, 0.08)";
+        ctx.fillRect(xStart, paddingTop, w - paddingRight - xStart, plotH);
+        
+        ctx.strokeStyle = "rgba(254, 135, 97, 0.35)";
+        ctx.setLineDash([4 * window.devicePixelRatio, 4 * window.devicePixelRatio]);
+        ctx.beginPath();
+        ctx.moveTo(xStart, paddingTop);
+        ctx.lineTo(xStart, paddingTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Draw Down Price Line (Blue: #2B5D9F)
+      ctx.strokeStyle = "#2B5D9F";
+      ctx.lineWidth = 2 * window.devicePixelRatio;
+      ctx.beginPath();
+      for (let i = 0; i < count; i++) {
+        const x = paddingLeft + (i / (count - 1)) * plotW;
+        const y = paddingTop + plotH - (chartHistory.downPrices[i] || 0) * plotH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Draw Up Price Line (Light Blue: #C0E5ED)
+      ctx.strokeStyle = "#C0E5ED";
+      ctx.lineWidth = 2.5 * window.devicePixelRatio;
+      ctx.beginPath();
+      for (let i = 0; i < count; i++) {
+        const x = paddingLeft + (i / (count - 1)) * plotW;
+        const y = paddingTop + plotH - (chartHistory.upPrices[i] || 0) * plotH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // ACTION MARKERS: Render Buy/Sell actions with Orange Highlight (#FE8761)
+      if (chartHistory.actions.length > 0) {
+        for (const action of chartHistory.actions) {
+          // Find closest timestamp index
+          let closestIdx = 0;
+          let minDiff = Infinity;
+          for (let i = 0; i < count; i++) {
+            const diff = Math.abs(chartHistory.timestamps[i] - action.timestamp);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestIdx = i;
+            }
+          }
+
+          const actionX = paddingLeft + (closestIdx / (count - 1)) * plotW;
+          const priceY = paddingTop + plotH - action.price * plotH;
+
+          // Vertical Marker Pin
+          ctx.strokeStyle = "#FE8761";
+          ctx.lineWidth = 2 * window.devicePixelRatio;
+          ctx.setLineDash([3 * window.devicePixelRatio, 3 * window.devicePixelRatio]);
+          ctx.beginPath();
+          ctx.moveTo(actionX, paddingTop);
+          ctx.lineTo(actionX, paddingTop + plotH);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Glowing Circle on price
+          ctx.fillStyle = "#FE8761";
+          ctx.beginPath();
+          ctx.arc(actionX, priceY, 5 * window.devicePixelRatio, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Action Tag Badge
+          const tagText = `${action.side === "UP" ? "▲ BUY UP" : "▼ BUY DOWN"} @ $${action.price.toFixed(2)}`;
+          ctx.font = `bold ${10 * window.devicePixelRatio}px monospace`;
+          const textMetrics = ctx.measureText(tagText);
+          const tagW = textMetrics.width + 12 * window.devicePixelRatio;
+          const tagH = 18 * window.devicePixelRatio;
+          const tagY = Math.max(paddingTop + 6, priceY - 22 * window.devicePixelRatio);
+
+          ctx.fillStyle = "#FE8761";
+          ctx.beginPath();
+          ctx.roundRect(actionX - tagW / 2, tagY, tagW, tagH, 4 * window.devicePixelRatio);
+          ctx.fill();
+
+          ctx.fillStyle = "#0C1846";
+          ctx.textAlign = "center";
+          ctx.fillText(tagText, actionX, tagY + 13 * window.devicePixelRatio);
+        }
+      }
+    }
+
+    // 1. Fetch Backend State
     async function fetchState() {
       try {
         const res = await fetch("/api/state");
         if (!res.ok) return;
         const state = await res.json();
         renderState(state);
-      } catch (e) {
-        console.error("State poll err:", e);
-      }
+      } catch (e) {}
     }
 
-    // 2. Fetch active tokens or resolve from Gamma API directly from client browser
+    // 2. Fetch Active Tokens for Browser WS Relay
     async function syncTokens() {
       try {
         const res = await fetch("/api/tokens");
         if (res.ok) {
           const data = await res.json();
-          if (data.current.length > 0) {
-            if (JSON.stringify(data) !== JSON.stringify(activeTokens)) {
-              activeTokens = data;
-              subscribePolymarketWs();
-            }
+          if (data.current.length > 0 && JSON.stringify(data) !== JSON.stringify(activeTokens)) {
+            activeTokens = data;
+            subscribePolymarketWs();
             return;
           }
         }
 
-        // If backend hasn't populated tokens, resolve from Gamma API directly in browser
         const stateRes = await fetch("/api/state");
         if (stateRes.ok) {
           const s = await stateRes.json();
@@ -208,9 +521,7 @@
                   await fetch("/api/tokens/register", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      current: { up: tokenIds[0], down: tokenIds[1] },
-                    }),
+                    body: JSON.stringify({ current: { up: tokenIds[0], down: tokenIds[1] } }),
                   });
                   subscribePolymarketWs();
                 }
@@ -218,36 +529,24 @@
             }
           }
         }
-      } catch (err) {
-        console.error("Token sync error:", err);
-      }
+      } catch (err) {}
     }
 
-    // 3. Direct browser WebSocket to Polymarket CLOB (bypasses sandbox firewall)
     function subscribePolymarketWs() {
       const allTokens = [...activeTokens.current, ...activeTokens.next].filter(Boolean);
       if (allTokens.length === 0) return;
 
       if (!polymarketWs || polymarketWs.readyState !== WebSocket.OPEN) {
         polymarketWs = new WebSocket("wss://ws-subscriptions-clob.polymarket.com/ws/market");
-
         polymarketWs.onopen = () => {
-          document.getElementById("transport-pulse").className = "pulse pulse-green";
-          polymarketWs.send(JSON.stringify({
-            type: "market",
-            assets_ids: allTokens,
-            custom_feature_enabled: true
-          }));
-
+          polymarketWs.send(JSON.stringify({ type: "market", assets_ids: allTokens, custom_feature_enabled: true }));
           setInterval(() => {
             if (polymarketWs.readyState === WebSocket.OPEN) polymarketWs.send("PING");
           }, 10000);
         };
-
         polymarketWs.onmessage = async (event) => {
           if (event.data === "PONG") return;
           try {
-            // Relay raw tick to backend engine
             await fetch("/api/relay/tick", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -255,30 +554,56 @@
             });
           } catch {}
         };
-
-        polymarketWs.onerror = () => {
-          document.getElementById("transport-pulse").className = "pulse pulse-yellow";
-        };
       } else {
-        polymarketWs.send(JSON.stringify({
-          type: "market",
-          assets_ids: allTokens,
-          custom_feature_enabled: true
-        }));
+        polymarketWs.send(JSON.stringify({ type: "market", assets_ids: allTokens, custom_feature_enabled: true }));
       }
     }
 
     function renderState(s) {
       if (!s || !s.slot) return;
 
-      // Timer & Slot
+      // Record price tick for Time Series Chart
+      if (s.up.mid > 0 || s.down.mid > 0) {
+        const now = Date.now();
+        chartHistory.timestamps.push(now);
+        chartHistory.upPrices.push(s.up.mid || 0);
+        chartHistory.downPrices.push(s.down.mid || 0);
+
+        // Keep maximum 300 data points (5 minutes @ 1 tick/sec)
+        if (chartHistory.timestamps.length > 300) {
+          chartHistory.timestamps.shift();
+          chartHistory.upPrices.shift();
+          chartHistory.downPrices.shift();
+        }
+      }
+
+      // Sync Trade Action Markers from Paper Wallet
+      if (s.paperWallet && s.paperWallet.tradeHistory) {
+        chartHistory.actions = s.paperWallet.tradeHistory.map(pos => ({
+          timestamp: pos.openedAt,
+          side: pos.side,
+          price: pos.price,
+          shares: pos.shares,
+          slotEpoch: pos.slotEpoch
+        }));
+      }
+
+      // Slot & Countdown
       const min = Math.floor(s.slot.secondsRemaining / 60);
       const sec = s.slot.secondsRemaining % 60;
       document.getElementById("timer").innerText = `${min}:${sec < 10 ? '0' : ''}${sec}`;
       document.getElementById("slot-slug").innerText = s.slot.slug;
       document.getElementById("progress-fill").style.width = `${s.slot.progressPct}%`;
-      document.getElementById("warmup-status").innerText = s.slot.warmupPhase ? "WARMING NEXT SLOT" : "Inactive";
-      document.getElementById("warmup-status").style.color = s.slot.warmupPhase ? "var(--yellow)" : "var(--text-dim)";
+      document.getElementById("slot-epoch-label").innerText = `SLOT: ${s.slot.epoch}`;
+
+      const warmupBadge = document.getElementById("warmup-badge");
+      if (s.slot.warmupPhase) {
+        warmupBadge.className = "badge badge-cta";
+        warmupBadge.innerText = "WARMUP NEXT SLOT";
+      } else {
+        warmupBadge.className = "badge badge-blue";
+        warmupBadge.innerText = "SLOT ACTIVE";
+      }
 
       // Safety Badge
       const badge = document.getElementById("safety-badge");
@@ -290,53 +615,70 @@
         badge.innerText = `NO TRADE: ${s.safety.reasons.join(", ")}`;
       }
 
+      // Strategy
+      if (s.strategy) {
+        const strat = s.strategy;
+        const actionEl = document.getElementById("strat-action");
+        actionEl.innerText = strat.recommendedAction;
+        actionEl.className = strat.recommendedAction === "HOLD_NO_EDGE" ? "stat-val tint" : "stat-val highlight";
+
+        const actionBadge = document.getElementById("action-badge");
+        if (strat.recommendedAction !== "HOLD_NO_EDGE") {
+          actionBadge.style.display = "inline-flex";
+          actionBadge.innerText = `ACTION: ${strat.recommendedAction}`;
+        } else {
+          actionBadge.style.display = "none";
+        }
+
+        document.getElementById("strat-probs").innerText = `Up: ${(strat.trueProbabilityUp * 100).toFixed(1)}% | Down: ${(strat.trueProbabilityDown * 100).toFixed(1)}%`;
+        document.getElementById("strat-ev-up").innerText = `$${strat.expectedValueUp.toFixed(3)} (${strat.netEdgeUpPct}%)`;
+        document.getElementById("strat-ev-down").innerText = `$${strat.expectedValueDown.toFixed(3)} (${strat.netEdgeDownPct}%)`;
+        document.getElementById("strat-z").innerText = strat.zScore.toFixed(2);
+        
+        document.getElementById("sniper-window-status").innerText = strat.inSniperWindow ? "ACTIVE (<90s)" : "Waiting (T > 90s)";
+        document.getElementById("sniper-window-status").className = strat.inSniperWindow ? "stat-val highlight" : "stat-val tint";
+        document.getElementById("price-to-beat").innerText = strat.priceToBeat ? `$${strat.priceToBeat.toFixed(2)}` : "Resolving...";
+      }
+
+      // Paper Wallet
+      if (s.paperWallet) {
+        const w = s.paperWallet;
+        document.getElementById("paper-balance").innerText = `$${w.balanceUsd.toFixed(2)}`;
+        const pnlEl = document.getElementById("paper-pnl");
+        pnlEl.innerText = `$${w.realizedPnlUsd.toFixed(2)} (${w.returnPct >= 0 ? '+' : ''}${w.returnPct}%)`;
+        pnlEl.className = w.realizedPnlUsd >= 0 ? "stat-val tint" : "stat-val";
+        pnlEl.style.color = w.realizedPnlUsd >= 0 ? "var(--green)" : "var(--red)";
+        document.getElementById("paper-winrate").innerText = `${w.winRatePct}% (${w.wins}W - ${w.losses}L)`;
+        document.getElementById("paper-trades-badge").innerText = `${w.totalTrades} TRADES`;
+
+        const activePos = w.activePositions && w.activePositions.length > 0 ? w.activePositions[0] : null;
+        const activeEl = document.getElementById("paper-active");
+        if (activePos) {
+          activeEl.innerText = `${activePos.side} (${activePos.shares} shares @ $${activePos.price.toFixed(2)})`;
+          activeEl.className = "stat-val highlight";
+        } else {
+          activeEl.innerText = "None (Looking for EV > 0)";
+          activeEl.className = "stat-val tint";
+        }
+      }
+
       // Parity
       document.getElementById("mid-parity").innerText = s.signal.midParity.toFixed(4);
       document.getElementById("buy-both-cost").innerText = `$${s.signal.buyBothCost.toFixed(4)}`;
       document.getElementById("gross-edge").innerText = `$${s.signal.buyBothGrossEdge.toFixed(4)}`;
       document.getElementById("net-edge").innerText = `$${s.signal.buyBothNetEdge.toFixed(4)}`;
-      document.getElementById("arb-viable").innerText = s.economics.buyBothArbitrage.isViable ? "YES (PROFITABLE)" : "False";
-      document.getElementById("arb-viable").style.color = s.economics.buyBothArbitrage.isViable ? "var(--green)" : "var(--yellow)";
-
-      // Strategy
-      if (s.strategy) {
-        const actionEl = document.getElementById("strat-action");
-        actionEl.innerText = s.strategy.recommendedAction;
-        actionEl.style.color = s.strategy.recommendedAction === "HOLD_NO_EDGE" ? "var(--yellow)" : "var(--green)";
-        document.getElementById("strat-prob-up").innerText = `${(s.strategy.trueProbabilityUp * 100).toFixed(1)}%`;
-        document.getElementById("strat-prob-down").innerText = `${(s.strategy.trueProbabilityDown * 100).toFixed(1)}%`;
-        document.getElementById("strat-ev-up").innerText = `$${s.strategy.expectedValueUp.toFixed(3)} (${s.strategy.netEdgeUpPct}%)`;
-        document.getElementById("strat-ev-down").innerText = `$${s.strategy.expectedValueDown.toFixed(3)} (${s.strategy.netEdgeDownPct}%)`;
-        document.getElementById("strat-z").innerText = s.strategy.zScore.toFixed(2);
-      }
-
-      // Paper Wallet
-      if (s.paperWallet) {
-        document.getElementById("paper-balance").innerText = `$${s.paperWallet.balanceUsd.toFixed(2)}`;
-        const pnlEl = document.getElementById("paper-pnl");
-        pnlEl.innerText = `$${s.paperWallet.realizedPnlUsd.toFixed(2)} (${s.paperWallet.returnPct >= 0 ? '+' : ''}${s.paperWallet.returnPct}%)`;
-        pnlEl.style.color = s.paperWallet.realizedPnlUsd >= 0 ? "var(--green)" : "var(--red)";
-        document.getElementById("paper-winrate").innerText = `${s.paperWallet.winRatePct}% (${s.paperWallet.wins}W - ${s.paperWallet.losses}L)`;
-        document.getElementById("paper-trades").innerText = s.paperWallet.totalTrades;
-        document.getElementById("paper-active").innerText = s.paperWallet.activePositions && s.paperWallet.activePositions.length > 0
-          ? `${s.paperWallet.activePositions[0].side} (${s.paperWallet.activePositions[0].shares} shares @ $${s.paperWallet.activePositions[0].price})`
-          : "None";
-      }
 
       // Books
       renderBook("up", s.up);
       renderBook("down", s.down);
 
       // Meta
-      document.getElementById("snapshot-id").innerText = s.meta.snapshotId.slice(0, 8);
+      document.getElementById("snapshot-id").innerText = s.meta.snapshotId ? s.meta.snapshotId.slice(0, 8) : "--";
       document.getElementById("book-seq").innerText = s.meta.bookSequence;
-      document.getElementById("transport-mode").innerText = `${s.meta.source} (Age: ${s.safety.bookAgeMs}ms)`;
     }
 
     function renderBook(prefix, leg) {
-      document.getElementById(`${prefix}-mid`).innerText = `Mid: $${leg.mid.toFixed(3)}`;
-      document.getElementById(`${prefix}-spread`).innerText = `$${leg.spread.toFixed(3)}`;
-      document.getElementById(`${prefix}-imbalance`).innerText = `${(leg.imbalance * 100).toFixed(1)}%`;
+      document.getElementById(`${prefix}-mid`).innerText = `Mid: $${leg.mid.toFixed(3)} | Spr: $${leg.spread.toFixed(3)}`;
 
       const bidsEl = document.getElementById(`${prefix}-bids`);
       bidsEl.innerHTML = (leg.bids || []).slice(0, 5).map(([p, s]) => 
@@ -350,7 +692,7 @@
     }
 
     setInterval(fetchState, 500);
-    setInterval(syncTokens, 5000);
+    setInterval(syncTokens, 4000);
     fetchState();
     syncTokens();
   </script>
