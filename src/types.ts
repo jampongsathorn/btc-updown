@@ -129,6 +129,9 @@ export interface LiveEngineState {
     reason: string;
     priceToBeat?: number;
     currentSpot?: number;
+    realizedVol?: number;
+    kellyFraction?: number;
+    recommendedShares?: number;
   };
   paperWallet?: {
     balanceUsd: number;

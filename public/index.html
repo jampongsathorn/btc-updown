@@ -247,6 +247,8 @@
       <div class="stat-row"><span class="stat-label">Net Expected Value (EV Up):</span><span class="stat-val" id="strat-ev-up">--</span></div>
       <div class="stat-row"><span class="stat-label">Net Expected Value (EV Down):</span><span class="stat-val" id="strat-ev-down">--</span></div>
       <div class="stat-row"><span class="stat-label">Diffusion Z-Score (&Delta; / &sigma;&tau;):</span><span class="stat-val" id="strat-z">--</span></div>
+      <div class="stat-row"><span class="stat-label">Dynamic Realized Vol (&sigma;):</span><span class="stat-val tint" id="strat-vol">55.0%</span></div>
+      <div class="stat-row"><span class="stat-label">Fractional Kelly Sizing:</span><span class="stat-val highlight" id="strat-kelly">--</span></div>
     </div>
   </div>
 
@@ -635,6 +637,8 @@
         document.getElementById("strat-ev-up").innerText = `$${strat.expectedValueUp.toFixed(3)} (${strat.netEdgeUpPct}%)`;
         document.getElementById("strat-ev-down").innerText = `$${strat.expectedValueDown.toFixed(3)} (${strat.netEdgeDownPct}%)`;
         document.getElementById("strat-z").innerText = strat.zScore.toFixed(2);
+        document.getElementById("strat-vol").innerText = `${((strat.realizedVol || 0.55) * 100).toFixed(1)}% / yr`;
+        document.getElementById("strat-kelly").innerText = `${((strat.kellyFraction || 0.05) * 100).toFixed(1)}% bankroll (${strat.recommendedShares || 0} shs)`;
         
         document.getElementById("sniper-window-status").innerText = strat.inSniperWindow ? "ACTIVE (<90s)" : "Waiting (T > 90s)";
         document.getElementById("sniper-window-status").className = strat.inSniperWindow ? "stat-val highlight" : "stat-val tint";

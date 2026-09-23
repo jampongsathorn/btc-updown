@@ -49,6 +49,8 @@ function formatSignal() {
     console.log("  \x1b[1mQUANTITATIVE STRATEGY (VARIANCE COLLAPSE SNIPER):\x1b[0m");
     console.log(`  • Model Prob (p*):             Up: ${(strat.trueProbabilityUp * 100).toFixed(1)}% | Down: ${(strat.trueProbabilityDown * 100).toFixed(1)}% (Z: ${strat.zScore})`);
     console.log(`  • Expected Value (EV):         Up: \x1b[1m+$${strat.expectedValueUp.toFixed(3)}\x1b[0m | Down: \x1b[1m+$${strat.expectedValueDown.toFixed(3)}\x1b[0m`);
+    console.log(`  • Microstructure Volatility:   ${((strat.realizedVol ?? 0.55) * 100).toFixed(1)}% annualized realized sigma`);
+    console.log(`  • Fractional Kelly Bet Size:   ${((strat.kellyFraction ?? 0.05) * 100).toFixed(1)}% bankroll (${strat.recommendedShares ?? 0} shares recommended)`);
     console.log(`  • Action Decision:             ${actionColor}\x1b[1m[${strat.recommendedAction}]\x1b[0m — ${strat.reason}`);
     console.log("------------------------------------------------------------");
   }

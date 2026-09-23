@@ -8,6 +8,8 @@ import { StateStore } from "./state.js";
 import { NodeWsClient, NormalizedEvent } from "./transport.js";
 import { evaluateVarianceCollapse, VarianceCollapseResult } from "./strategies/variance-collapse.js";
 import { PaperWallet } from "./paper-wallet.js";
+import { RealizedVolatilityEstimator } from "./volatility.js";
+import { calculateKellyFraction, calculateOrderSizeShares } from "./kelly.js";
 
 export interface EngineOptions {
   config?: EngineConfig;
@@ -35,6 +37,7 @@ export class MarketEngine {
   public wallet = new PaperWallet({ initialUsd: 1000 });
   public priceToBeat: number = 0;
   public currentSpot: number = 0;
+  private volatilityEstimator = new RealizedVolatilityEstimator();
 
   private feeSchedule: FeeSchedule = {
     rate: 0.07,
@@ -132,6 +135,7 @@ export class MarketEngine {
   public setSpotPrices(spot: number, priceToBeat: number): void {
     this.currentSpot = spot;
     this.priceToBeat = priceToBeat;
+    this.volatilityEstimator.recordPrice(spot);
     this.updateState();
   }
 
@@ -182,9 +186,10 @@ export class MarketEngine {
       feeModelVerified: this.feeModelVerified,
     });
 
-    // Evaluate Variance Collapse Quantitative Strategy
+    // Evaluate Variance Collapse Quantitative Strategy with Dynamic Realized Volatility
     const effectiveSpot = this.currentSpot || (this.priceToBeat ? this.priceToBeat * (1 + (upLeg.mid - 0.5) * 0.002) : 85000);
     const effectivePriceToBeat = this.priceToBeat || effectiveSpot;
+    const dynamicVol = this.volatilityEstimator.getAnnualizedVol();
 
     const currentActivePos = this.wallet.getStats().activePositions.find(p => p.slotEpoch === this.currentSlot.epoch);
 
@@ -196,9 +201,32 @@ export class MarketEngine {
       upBid: upLeg.bestBid,
       downAsk: downLeg.bestAsk,
       downBid: downLeg.bestBid,
+      annualizedVol: dynamicVol,
       takerFeeRate: this.feeSchedule.rate,
       currentPosition: currentActivePos ? { side: currentActivePos.side, entryPrice: currentActivePos.price } : undefined,
     });
+
+    // Kelly Criterion Optimal Bet Sizing
+    const targetAsk = strategyResult.recommendedAction === "BUY_UP" ? upLeg.bestAsk : downLeg.bestAsk;
+    const winProb = strategyResult.recommendedAction === "BUY_UP" ? strategyResult.trueProbabilityUp : strategyResult.trueProbabilityDown;
+    const kelly = calculateKellyFraction({
+      winProbability: winProb,
+      tokenAsk: targetAsk,
+      takerFeeRate: this.feeSchedule.rate,
+      stopLossPrice: targetAsk * 0.75, // exit early at ~25% loss floor
+      fractionMultiplier: 0.25, // Quarter-Kelly
+    });
+    const orderSize = calculateOrderSizeShares({
+      availableBankrollUsd: this.wallet.getStats().balanceUsd,
+      tokenAsk: targetAsk,
+      fraction: kelly.recommendedFraction > 0 ? kelly.recommendedFraction : 0.05,
+      maxSingleTradeUsd: 150,
+      minShares: 5,
+    });
+
+    strategyResult.realizedVol = dynamicVol;
+    strategyResult.kellyFraction = kelly.recommendedFraction;
+    strategyResult.recommendedShares = orderSize.shares;
 
     // Auto Paper Execution: Stop Loss Early Exit or Open Position
     if (strategyResult.recommendedAction === "STOP_LOSS_EXIT" && currentActivePos) {
@@ -206,9 +234,9 @@ export class MarketEngine {
       const exitFee = this.feeSchedule.rate * exitBid * (1 - exitBid) * currentActivePos.shares;
       this.wallet.closeEarly(this.currentSlot.epoch, exitBid, exitFee, "STOP_LOSS");
     } else if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && strategyResult.recommendedAction !== "STOP_LOSS_EXIT" && safety.canTrade) {
-      if (!currentActivePos) {
+      if (!currentActivePos && orderSize.shares > 0) {
         if (strategyResult.recommendedAction === "BUY_UP" && upLeg.bestAsk > 0) {
-          const shares = Math.min(50, upLeg.askTopSize || 50);
+          const shares = Math.min(orderSize.shares, upLeg.askTopSize || orderSize.shares);
           const fee = this.feeSchedule.rate * upLeg.bestAsk * (1 - upLeg.bestAsk) * shares;
           this.wallet.openPosition({
             slotEpoch: this.currentSlot.epoch,
@@ -218,7 +246,7 @@ export class MarketEngine {
             fee,
           });
         } else if (strategyResult.recommendedAction === "BUY_DOWN" && downLeg.bestAsk > 0) {
-          const shares = Math.min(50, downLeg.askTopSize || 50);
+          const shares = Math.min(orderSize.shares, downLeg.askTopSize || orderSize.shares);
           const fee = this.feeSchedule.rate * downLeg.bestAsk * (1 - downLeg.bestAsk) * shares;
           this.wallet.openPosition({
             slotEpoch: this.currentSlot.epoch,
