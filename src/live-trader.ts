@@ -30,6 +30,26 @@ export interface LiveOrderResult {
   error?: string;
 }
 
+/**
+ * clob-client's postOrder() reports rejection (e.g. insufficient balance, bad
+ * signature) INSIDE the response body (OrderResponse.success/errorMsg) - it
+ * does not throw for that. Confirmed 2026-09-23: a BUY_DOWN was logged as
+ * "order placed" with orderId undefined, and the wallet's real on-chain
+ * activity showed the order never happened - the previous code returned
+ * `{ success: true }` unconditionally whenever the HTTP call itself didn't
+ * throw, ignoring the body entirely.
+ */
+export function interpretOrderResponse(result: {
+  success?: boolean;
+  errorMsg?: string;
+  orderID?: string;
+} | null | undefined): LiveOrderResult {
+  if (!result?.success) {
+    return { success: false, error: result?.errorMsg || "order rejected (no errorMsg returned)", raw: result };
+  }
+  return { success: true, orderId: result.orderID, raw: result };
+}
+
 export class LiveTrader {
   private client: ClobClient | null = null;
   private initPromise: Promise<void> | null = null;
@@ -95,7 +115,7 @@ export class LiveTrader {
         side: Side.BUY,
       });
       const result = await this.client!.postOrder(order);
-      return { success: true, orderId: result?.orderID, raw: result };
+      return interpretOrderResponse(result);
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
     }
@@ -115,7 +135,7 @@ export class LiveTrader {
         side: Side.SELL,
       });
       const result = await this.client!.postOrder(order);
-      return { success: true, orderId: result?.orderID, raw: result };
+      return interpretOrderResponse(result);
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
     }
