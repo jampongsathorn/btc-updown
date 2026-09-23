@@ -18,7 +18,27 @@ export function createServer(options: ServerOptions) {
   const normalizer = new TransportNormalizer();
 
   app.use(express.json({ limit: "5mb" }));
-  app.use(express.static(path.join(process.cwd(), "public")));
+
+  // Prevent browser caching so live preview updates immediately
+  app.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    next();
+  });
+
+  app.use(express.static(path.join(process.cwd(), "public"), {
+    etag: false,
+    maxAge: 0,
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    }
+  }));
+
+  app.get("/", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.sendFile(path.join(process.cwd(), "public/index.html"));
+  });
 
   app.get("/api/state", (_req, res) => {
     const state = options.stateStore.readState();
