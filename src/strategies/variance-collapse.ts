@@ -51,6 +51,10 @@ export interface VarianceCollapseResult {
   realizedVol?: number;
   kellyFraction?: number;
   recommendedShares?: number;
+  // Shadow-mode diagnostic fields (see engine.ts) - not used for trading decisions.
+  twapProbabilityUp?: number;
+  twapProbabilityDown?: number;
+  twapZScore?: number;
 }
 
 export function evaluateVarianceCollapse(input: VarianceCollapseInput): VarianceCollapseResult {

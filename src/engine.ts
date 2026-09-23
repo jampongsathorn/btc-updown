@@ -6,7 +6,8 @@ import { calculateEconomics, FeeSchedule } from "./economics.js";
 import { evaluateSafety } from "./validator.js";
 import { StateStore } from "./state.js";
 import { NodeWsClient, NormalizedEvent } from "./transport.js";
-import { evaluateVarianceCollapse, VarianceCollapseResult } from "./strategies/variance-collapse.js";
+import { evaluateVarianceCollapse, VarianceCollapseResult, normalCdf } from "./strategies/variance-collapse.js";
+import { ChainlinkTwapPredictor } from "./twap-interpolator.js";
 import { PaperWallet } from "./paper-wallet.js";
 import { RealizedVolatilityEstimator } from "./volatility.js";
 import { calculateKellyFraction, calculateOrderSizeShares } from "./kelly.js";
@@ -45,6 +46,11 @@ export class MarketEngine {
   public priceToBeat: number = 0;
   public currentSpot: number = 0;
   private volatilityEstimator = new RealizedVolatilityEstimator();
+  // SHADOW MODE (see plan): TWAP-aware probability is computed and exposed
+  // in state for observation only. It does NOT drive recommendedAction,
+  // Kelly sizing, or paper-wallet execution - those still use the original
+  // spot-diffusion evaluateVarianceCollapse() result, unchanged.
+  private twapPredictor!: ChainlinkTwapPredictor;
 
   private feeSchedule: FeeSchedule = {
     rate: 0.07,
@@ -68,6 +74,7 @@ export class MarketEngine {
 
     this.currentSlot = this.scheduler.getCurrentSlot();
     this.nextSlot = this.scheduler.getNextSlot();
+    this.twapPredictor = new ChainlinkTwapPredictor({ slotEpoch: this.currentSlot.epoch });
 
     if (options?.autoConnectNodeWs !== false) {
       this.initNodeWs();
@@ -201,6 +208,7 @@ export class MarketEngine {
         this.currentTokens = this.nextTokens;
         this.upBook = this.nextUpBook;
         this.downBook = this.nextDownBook;
+        this.twapPredictor = new ChainlinkTwapPredictor({ slotEpoch: newCurrent.epoch });
 
         // Reset next
         this.nextUpBook = new Orderbook();
@@ -232,6 +240,25 @@ export class MarketEngine {
     const effectiveSpot = this.currentSpot || (this.priceToBeat ? this.priceToBeat * (1 + (upLeg.mid - 0.5) * 0.002) : 85000);
     const effectivePriceToBeat = this.priceToBeat || effectiveSpot;
     const dynamicVol = this.volatilityEstimator.getAnnualizedVol();
+
+    // SHADOW MODE: record this tick into the TWAP predictor and compute its
+    // probability estimate purely for observation (see class-level comment).
+    let twapProbabilityUp: number | undefined;
+    let twapProbabilityDown: number | undefined;
+    let twapZScore: number | undefined;
+    if (this.currentSpot > 0 && effectivePriceToBeat > 0) {
+      const elapsedSec = 300 - this.currentSlot.secondsRemaining;
+      this.twapPredictor.recordSpotTick(this.currentSpot, elapsedSec);
+      const twapEstimate = this.twapPredictor.estimateFinalTwap(
+        this.currentSpot,
+        elapsedSec,
+        dynamicVol,
+        effectivePriceToBeat
+      );
+      twapZScore = twapEstimate.zScoreVsStrike;
+      twapProbabilityUp = parseFloat(normalCdf(twapZScore).toFixed(4));
+      twapProbabilityDown = parseFloat((1 - twapProbabilityUp).toFixed(4));
+    }
 
     const currentActivePos = this.wallet.getStats().activePositions.find(p => p.slotEpoch === this.currentSlot.epoch);
 
@@ -269,6 +296,9 @@ export class MarketEngine {
     strategyResult.realizedVol = dynamicVol;
     strategyResult.kellyFraction = kelly.recommendedFraction;
     strategyResult.recommendedShares = orderSize.shares;
+    strategyResult.twapProbabilityUp = twapProbabilityUp;
+    strategyResult.twapProbabilityDown = twapProbabilityDown;
+    strategyResult.twapZScore = twapZScore;
 
     // Auto Paper Execution: Stop Loss Early Exit or Open Position
     if (strategyResult.recommendedAction === "STOP_LOSS_EXIT" && currentActivePos) {

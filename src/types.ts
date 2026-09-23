@@ -132,6 +132,9 @@ export interface LiveEngineState {
     realizedVol?: number;
     kellyFraction?: number;
     recommendedShares?: number;
+    twapProbabilityUp?: number;
+    twapProbabilityDown?: number;
+    twapZScore?: number;
   };
   paperWallet?: {
     balanceUsd: number;
