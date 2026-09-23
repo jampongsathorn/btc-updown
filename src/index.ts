@@ -1,5 +1,5 @@
 import { MarketEngine } from "./engine.js";
-import { createServer } from "./server.js";
+import { createServer, ServerOptions } from "./server.js";
 import { MarketRecorder } from "./recorder.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -19,7 +19,7 @@ setInterval(() => {
   if (state) recorder.recordTick(state);
 }, 250);
 
-const serverOptions: any = {
+const serverOptions: ServerOptions = {
   port: DEFAULT_CONFIG.PORT,
   stateStore: engine.stateStore,
   onRelayEvent: (event: any) => {
