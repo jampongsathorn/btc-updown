@@ -66,7 +66,17 @@ echo "🚦 Starting engine and auto-sync daemon under PM2 supervisor..."
 pm2 delete btc-sniper 2>/dev/null || true
 pm2 delete btc-sync 2>/dev/null || true
 
-pm2 start dist/index.js --name "btc-sniper" --time
+
+# Node's --env-file must be a real argv flag on the `node` binary itself -
+# pm2's --node-args/node_args is unreliable for this in fork mode (confirmed
+# 2026-09-23: pm2 registers it in `pm2 describe` but the spawned process
+# never actually receives it). Passing `node` as the script and the flag as
+# its first arg is what actually works.
+if [ -f .env ]; then
+  pm2 start node --name "btc-sniper" --time -- --env-file=.env dist/index.js
+else
+  pm2 start dist/index.js --name "btc-sniper" --time
+fi
 pm2 start scripts/auto-sync.sh --name "btc-sync" --interpreter bash
 
 echo "💾 Setting PM2 to start on system boot..."
