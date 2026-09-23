@@ -11,6 +11,7 @@
     "backtest": "tsx scripts/run-historical-backtest.ts",
     "prove": "tsx scripts/prove-strategy.ts",
     "prove:timeseries": "tsx scripts/prove-timeseries.ts",
+    "prove:real": "tsx scripts/prove-real-polymarket-rounds.ts",
     "start": "tsx src/index.ts",
     "signal": "tsx src/cli.ts signal",
     "log": "tsx src/cli.ts log"
