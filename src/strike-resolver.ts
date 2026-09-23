@@ -68,7 +68,15 @@ export class StrikeResolver {
 
     try {
       const candles = await this.fetchCandlesFn(epoch);
-      if (!Array.isArray(candles) || candles.length === 0) return null; // expected: T0 candle not closed yet
+      if (!Array.isArray(candles) || candles.length === 0) {
+        // Expected while the T0 candle hasn't closed yet (first ~60-90s of a
+        // slot) - logged (not silent) because 2026-09-23 showed a live slot
+        // getting [] for its ENTIRE ~220s window while a fresh standalone
+        // call for the same epoch, seconds later, returned real data. That
+        // gap needs visibility to tell "still warming up" from "stuck".
+        console.log(`[strike-resolver] Empty candle response for epoch ${epoch} (T0 not closed yet, or stuck - see comment)`);
+        return null;
+      }
 
       // Coinbase candle format: [time, low, high, open, close, volume]
       const match = candles.find((c) => Math.abs(c[0] - epoch) < 60);
