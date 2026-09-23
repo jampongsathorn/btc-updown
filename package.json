@@ -21,6 +21,7 @@
     "log": "tsx src/cli.ts log"
   },
   "dependencies": {
+    "@polymarket/clob-client": "^5.8.1",
     "express": "^4.21.2",
     "ws": "^8.18.0"
   },

@@ -8,6 +8,7 @@ import { StateStore } from "./state.js";
 import { NodeWsClient, NormalizedEvent } from "./transport.js";
 import { evaluateVarianceCollapse, VarianceCollapseResult, normalCdf } from "./strategies/variance-collapse.js";
 import { ChainlinkTwapPredictor } from "./twap-interpolator.js";
+import { liveTrader, isLiveTradingEnabled } from "./live-trader.js";
 import { PaperWallet } from "./paper-wallet.js";
 import { RealizedVolatilityEstimator } from "./volatility.js";
 import { calculateKellyFraction, calculateOrderSizeShares } from "./kelly.js";
@@ -361,6 +362,14 @@ export class MarketEngine {
             fee,
           });
 
+          if (isLiveTradingEnabled()) {
+            const usdAmount = parseFloat((shares * upLeg.bestAsk + fee).toFixed(2));
+            liveTrader.placeMarketBuy(this.currentTokens.up, usdAmount).then((result) => {
+              if (!result.success) console.error(`[live-trader] BUY_UP order failed: ${result.error}`);
+              else console.log(`[live-trader] BUY_UP order placed: ${result.orderId}`);
+            });
+          }
+
           const alert = formatEntryAlert({
             slotEpoch: this.currentSlot.epoch,
             slug: this.currentSlot.slug,
@@ -387,6 +396,14 @@ export class MarketEngine {
             price: downLeg.bestAsk,
             fee,
           });
+
+          if (isLiveTradingEnabled()) {
+            const usdAmount = parseFloat((shares * downLeg.bestAsk + fee).toFixed(2));
+            liveTrader.placeMarketBuy(this.currentTokens.down, usdAmount).then((result) => {
+              if (!result.success) console.error(`[live-trader] BUY_DOWN order failed: ${result.error}`);
+              else console.log(`[live-trader] BUY_DOWN order placed: ${result.orderId}`);
+            });
+          }
 
           const alert = formatEntryAlert({
             slotEpoch: this.currentSlot.epoch,
