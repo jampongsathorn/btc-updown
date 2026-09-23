@@ -149,6 +149,27 @@ describe("StrikeResolver", () => {
     fetchSpy.mockRestore();
   });
 
+  it("cache-busts every request with a unique query param (confirmed 2026-09-23: Cloudflare in front of Coinbase's API caches GET responses for max-age=300s, keyed by the exact URL - a live slot's identical every-5s poll got the SAME stale [] back for most of its ~300s life)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => [[1790185200, 84000, 84050, 84009.25, 84030, 12.5]],
+    } as Response);
+
+    const resolver = new StrikeResolver();
+    await resolver.resolveStrike(1790185200);
+    // Second call for a DIFFERENT epoch, just to get a second real request
+    // through defaultFetchCandles (resolveStrike caches per-epoch, so a
+    // second call for the SAME epoch wouldn't hit fetch again at all).
+    await resolver.resolveStrike(1790185500);
+
+    const urlA = new URL(fetchSpy.mock.calls[0][0] as string);
+    const urlB = new URL(fetchSpy.mock.calls[1][0] as string);
+    expect(urlA.searchParams.get("_cb")).toBeTruthy();
+    expect(urlA.searchParams.get("_cb")).not.toBe(urlB.searchParams.get("_cb"));
+
+    fetchSpy.mockRestore();
+  });
+
   it("retries once on a transient fetch failure before giving up (confirmed 2026-09-23: intermittent bare 'fetch failed' on an otherwise-healthy connection)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new TypeError("fetch failed"))

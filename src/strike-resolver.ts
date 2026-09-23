@@ -39,18 +39,27 @@ export class StrikeResolver {
     // ".000Z", which made this fail 100% of the time (confirmed 2026-09-23 via
     // direct curl: identical request minus the ".000" returns real candles).
     const toSecondIso = (unixSec: number) => new Date(unixSec * 1000).toISOString().replace(".000Z", "Z");
-    // Window width matters, separately from the ".000Z" bug above: confirmed
-    // 2026-09-23 that a request spanning exactly 120s (2 x granularity=60
-    // buckets) reliably returns [] from Coinbase - a THIRD request for the
-    // exact same start but a 180s+ span returns the real candles correctly,
-    // reproduced deterministically via curl. This was the actual reason a
-    // live slot could go its entire ~220s window without ever resolving even
-    // after the ".000Z" and retry fixes: every attempt used exactly this
-    // 120s span. 300s (comfortably past whatever internal threshold this is)
-    // costs nothing extra - the code below only ever looks for one candle.
     const isoStart = toSecondIso(epoch);
-    const isoEnd = toSecondIso(epoch + 300);
-    const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?start=${isoStart}&end=${isoEnd}&granularity=60`;
+    const isoEnd = toSecondIso(epoch + 300); // wide enough to comfortably include the one candle we look for
+
+    // THE REAL recurring-failure mechanism (confirmed 2026-09-23 via response
+    // headers): Cloudflare sits in front of this endpoint and caches GET
+    // responses for `max-age=300` seconds, keyed by the full URL - confirmed
+    // via `cf-cache-status: HIT` and `age: 140` on a request that kept
+    // returning a stale []. Our URL is a pure function of `epoch` alone, so
+    // it is IDENTICAL on every 5s poll for a given slot. If the very first
+    // poll for a slot lands before its T0 candle has closed (routine - the
+    // resolver is designed to see [] then), Cloudflare caches that empty
+    // result for up to 5 minutes - nearly the entire slot - and every
+    // subsequent poll for the rest of the slot's life gets that same stale
+    // [] back, even long after the real candle exists. (An earlier attempt
+    // to fix this by widening the query window from 120s to 300s was based
+    // on a false lead - two different-URL requests just happened to land on
+    // different cache states; the window width itself was never the cause.)
+    // A cache-busting param defeats this: it makes each request's URL unique,
+    // so Cloudflare can never serve a previous slot's cached miss again.
+    const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?start=${isoStart}&end=${isoEnd}&granularity=60&_cb=${cacheBust}`;
 
     // Confirmed 2026-09-23: intermittent bare "fetch failed" (a connection-level
     // failure, not an HTTP error status) happens occasionally even though a
