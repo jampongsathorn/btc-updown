@@ -142,6 +142,20 @@ export class LiveTrader {
   }
 
   /**
+   * Real USDC collateral balance available to trade with, in dollars. Used to
+   * size live orders against the actual wallet instead of the paper wallet's
+   * simulated bankroll (see engine.ts) - confirmed 2026-09-23: sizing was
+   * computed off the paper wallet's fake $1000 starting balance even when
+   * live trading was on, producing a $53.99 order against a wallet that
+   * actually held ~$15.
+   */
+  public async getCollateralBalance(): Promise<number> {
+    await this.ensureInitialized();
+    const resp = await this.client!.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+    return parseFloat(resp.balance) / 1_000_000;
+  }
+
+  /**
    * Sells the entire held balance of a token. Used for exits (stop-loss and
    * slot-end auto-exit) since the exact filled share count from the earlier
    * buy isn't tracked locally - this asks the CLOB for the real balance

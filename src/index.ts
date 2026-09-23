@@ -3,6 +3,7 @@ import { createServer, ServerOptions } from "./server.js";
 import { MarketRecorder } from "./recorder.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { StrikeResolver } from "./strike-resolver.js";
+import { liveTrader, isLiveTradingEnabled } from "./live-trader.js";
 
 let emitAlertCallback: ((payload: any) => void) | undefined;
 
@@ -133,10 +134,25 @@ async function updateSlotStrike(): Promise<void> {
   strikeResolver.pruneOlderThan(epoch - 300);
 }
 
+// --- Live balance (see live-trader.ts's getCollateralBalance doc comment) ---
+// Only polls when live trading is actually on, so a paper-only deployment
+// never needs PRIVATE_KEY set at all.
+async function refreshLiveBalance(): Promise<void> {
+  if (!isLiveTradingEnabled()) return;
+  try {
+    const balanceUsd = await liveTrader.getCollateralBalance();
+    engine.setLiveBalanceUsd(balanceUsd);
+  } catch (err: any) {
+    console.error(`[live-trader] Failed to refresh real balance: ${err?.message || err}`);
+  }
+}
+
 setInterval(syncTokens, 15_000);
 setInterval(pollSpotPrice, 3_000);
 setInterval(updateSlotStrike, 5_000);
+setInterval(refreshLiveBalance, 10_000);
 syncTokens();
+refreshLiveBalance();
 pollSpotPrice();
 updateSlotStrike();
 

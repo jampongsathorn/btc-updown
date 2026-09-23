@@ -77,6 +77,15 @@ export class MarketEngine {
   // so it can be sold on stop-loss or at slot end. Paper-wallet positions are
   // tracked separately in this.wallet and are unaffected by this.
   private liveOpenPosition: { epoch: number; tokenId: string; side: "UP" | "DOWN" } | null = null;
+  // Real USDC balance, refreshed periodically by index.ts via setLiveBalanceUsd()
+  // while live trading is on. null until the first refresh succeeds - sizing
+  // falls back to the paper wallet (safe: it just means no live order fires
+  // yet, never that it fires sized off the wrong number).
+  private liveBalanceUsd: number | null = null;
+
+  public setLiveBalanceUsd(balanceUsd: number): void {
+    this.liveBalanceUsd = balanceUsd;
+  }
 
   constructor(options?: EngineOptions) {
     this.config = options?.config || DEFAULT_CONFIG;
@@ -321,8 +330,11 @@ export class MarketEngine {
       stopLossPrice: targetAsk * 0.75, // exit early at ~25% loss floor
       fractionMultiplier: 0.25, // Quarter-Kelly
     });
+    // Size live orders off the real wallet balance, not the paper wallet's
+    // simulated bankroll - see setLiveBalanceUsd() doc comment above.
+    const liveTradingSizingReady = isLiveTradingEnabled() && this.liveBalanceUsd !== null;
     const orderSize = calculateOrderSizeShares({
-      availableBankrollUsd: this.wallet.getStats().balanceUsd,
+      availableBankrollUsd: liveTradingSizingReady ? this.liveBalanceUsd! : this.wallet.getStats().balanceUsd,
       tokenAsk: targetAsk,
       fraction: kelly.recommendedFraction > 0 ? kelly.recommendedFraction : 0.05,
       maxSingleTradeUsd: 150,
@@ -375,7 +387,11 @@ export class MarketEngine {
             fee,
           });
 
-          if (isLiveTradingEnabled()) {
+          // liveTradingSizingReady (not just isLiveTradingEnabled()) - shares
+          // above was sized off the real balance only when this is true;
+          // otherwise it's the paper wallet's fake bankroll, and firing a
+          // live order against that number is exactly the bug being fixed.
+          if (liveTradingSizingReady) {
             const usdAmount = parseFloat((shares * upLeg.bestAsk + fee).toFixed(2));
             liveTrader.placeMarketBuy(this.currentTokens.up, usdAmount).then((result) => {
               if (!result.success) console.error(`[live-trader] BUY_UP order failed: ${result.error}`);
@@ -413,7 +429,7 @@ export class MarketEngine {
             fee,
           });
 
-          if (isLiveTradingEnabled()) {
+          if (liveTradingSizingReady) {
             const usdAmount = parseFloat((shares * downLeg.bestAsk + fee).toFixed(2));
             liveTrader.placeMarketBuy(this.currentTokens.down, usdAmount).then((result) => {
               if (!result.success) console.error(`[live-trader] BUY_DOWN order failed: ${result.error}`);
