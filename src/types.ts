@@ -18,7 +18,8 @@ export type SafetyViolationReason =
   | "CROSSED_BOOK"
   | "INCOMPLETE_LEGS"
   | "FEE_MODEL_UNVERIFIED"
-  | "SLOT_TRANSITION_DESYNC";
+  | "SLOT_TRANSITION_DESYNC"
+  | "STRIKE_UNVERIFIED";
 
 export interface OrderbookLeg {
   tokenId: string;

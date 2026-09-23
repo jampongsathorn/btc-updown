@@ -44,6 +44,13 @@ export class MarketEngine {
 
   public wallet = new PaperWallet({ initialUsd: 1000 });
   public priceToBeat: number = 0;
+  // See strike-resolver.ts: priceToBeat is only trustworthy once anchored to
+  // the real T0 boundary candle via setStrikePrice(). strikeVerified gates
+  // canTrade via evaluateSafety(); strikeVerifiedEpoch lets the caller (see
+  // index.ts updateSlotStrike()) know whether the CURRENT slot's strike has
+  // already been resolved, so it doesn't refetch every tick.
+  public strikeVerified: boolean = false;
+  public strikeVerifiedEpoch: number | null = null;
   public currentSpot: number = 0;
   private volatilityEstimator = new RealizedVolatilityEstimator();
   // SHADOW MODE (see plan): TWAP-aware probability is computed and exposed
@@ -157,6 +164,20 @@ export class MarketEngine {
     this.updateState(customNow);
   }
 
+  /**
+   * The only sanctioned way to set priceToBeat with strikeVerified=true.
+   * Ignores stale resolutions for an epoch that is no longer the current
+   * slot (e.g. a slow candle fetch resolving after rollover already reset
+   * priceToBeat for the new slot).
+   */
+  public setStrikePrice(strike: number, epoch: number, source: string): void {
+    if (!(strike > 0) || epoch !== this.currentSlot.epoch) return;
+    this.priceToBeat = strike;
+    this.strikeVerified = true;
+    this.strikeVerifiedEpoch = epoch;
+    this.updateState();
+  }
+
   public updateState(customNow?: number): LiveEngineState {
     const now = customNow || Date.now();
     const oldEpoch = this.currentSlot?.epoch;
@@ -215,6 +236,7 @@ export class MarketEngine {
         this.nextDownBook = new Orderbook();
         this.nextTokens = { up: "", down: "" };
         this.priceToBeat = 0;
+        this.strikeVerified = false;
       },
     });
 
@@ -234,6 +256,7 @@ export class MarketEngine {
       upEmpty: this.upBook.isEmpty(),
       downEmpty: this.downBook.isEmpty(),
       feeModelVerified: this.feeModelVerified,
+      strikeVerified: this.strikeVerified,
     });
 
     // Evaluate Variance Collapse Quantitative Strategy with Dynamic Realized Volatility

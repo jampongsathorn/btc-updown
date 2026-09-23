@@ -2,6 +2,7 @@ import { MarketEngine } from "./engine.js";
 import { createServer, ServerOptions } from "./server.js";
 import { MarketRecorder } from "./recorder.js";
 import { DEFAULT_CONFIG } from "./types.js";
+import { StrikeResolver } from "./strike-resolver.js";
 
 let emitAlertCallback: ((payload: any) => void) | undefined;
 
@@ -92,9 +93,6 @@ async function syncTokens(): Promise<void> {
   }
 }
 
-let priceToBeatForEpoch: number | null = null;
-let priceToBeatEpoch: number | null = null;
-
 async function pollSpotPrice(): Promise<void> {
   try {
     const res = await fetch("https://api.exchange.coinbase.com/products/BTC-USD/ticker");
@@ -103,22 +101,44 @@ async function pollSpotPrice(): Promise<void> {
     const spot = parseFloat(data.price);
     if (!(spot > 0)) return;
 
-    const epoch = engine.currentSlot.epoch;
-    if (priceToBeatEpoch !== epoch) {
-      priceToBeatEpoch = epoch;
-      priceToBeatForEpoch = spot; // lock in strike at first observed price of this slot
-    }
-
-    engine.setSpotPrices(spot, priceToBeatForEpoch ?? spot);
+    // Only the live spot updates here. The strike (priceToBeat) is NOT set
+    // from "whatever spot we happen to see first" any more - see
+    // strike-resolver.ts for why that was wrong whenever this process
+    // connects or restarts mid-slot. updateSlotStrike() below is the only
+    // thing allowed to set the strike, from the actual T0 boundary candle.
+    engine.setSpotPrices(spot);
   } catch {
     // transient network error - next poll will retry
   }
 }
 
+// --- Strike resolution (see strike-resolver.ts) ---
+// Anchors priceToBeat to the real slot-opening price (Coinbase T0 boundary
+// candle) instead of the first spot tick observed after this process starts
+// or restarts. Safety gate STRIKE_UNVERIFIED keeps canTrade=false until this
+// resolves - which is fine, since trading never happens before the sniper
+// window (last ~90s of a slot), long after the T0 candle has closed.
+const strikeResolver = new StrikeResolver();
+
+async function updateSlotStrike(): Promise<void> {
+  const epoch = engine.currentSlot.epoch;
+  if (engine.strikeVerifiedEpoch === epoch) return;
+
+  const resolution = await strikeResolver.resolveStrike(epoch);
+  if (resolution && resolution.strike > 0) {
+    engine.setStrikePrice(resolution.strike, epoch, resolution.source);
+    console.log(`[strike] Locked in verified T0 strike for ${engine.currentSlot.slug}: $${resolution.strike} (${resolution.source})`);
+  }
+
+  strikeResolver.pruneOlderThan(epoch - 300);
+}
+
 setInterval(syncTokens, 15_000);
 setInterval(pollSpotPrice, 3_000);
+setInterval(updateSlotStrike, 5_000);
 syncTokens();
 pollSpotPrice();
+updateSlotStrike();
 
 app.listen(DEFAULT_CONFIG.PORT, "0.0.0.0", () => {
   console.log(`\n\x1b[32m[✓] Polymarket BTC UpDown 5m Engine running on http://0.0.0.0:${DEFAULT_CONFIG.PORT}\x1b[0m`);

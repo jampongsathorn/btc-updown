@@ -37,6 +37,24 @@ describe("Safety Guard (Fail-Closed)", () => {
     expect(report.reasons).toContain("CROSSED_BOOK");
   });
 
+  it("should fail closed when strike price is unverified", () => {
+    const report = evaluateSafety({
+      nowMs: 10000,
+      lastTickMs: 9900,
+      maxBookAgeMs: 2500,
+      connected: true,
+      upCrossed: false,
+      downCrossed: false,
+      upEmpty: false,
+      downEmpty: false,
+      feeModelVerified: true,
+      strikeVerified: false,
+    });
+
+    expect(report.canTrade).toBe(false);
+    expect(report.reasons).toContain("STRIKE_UNVERIFIED");
+  });
+
   it("should permit trading when all safety invariants pass", () => {
     const report = evaluateSafety({
       nowMs: 10000,

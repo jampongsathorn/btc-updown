@@ -24,10 +24,14 @@ describe("End-to-End Engine & Guard Pipeline", () => {
       { up: "token-up-2", down: "token-down-2" }
     );
 
-    // Initial state is incomplete legs -> failClosed
+    // Initial state is incomplete legs AND strike unverified -> failClosed
     let state = engine.updateState();
     expect(state.safety.canTrade).toBe(false);
     expect(state.safety.reasons).toContain("INCOMPLETE_LEGS");
+    expect(state.safety.reasons).toContain("STRIKE_UNVERIFIED");
+
+    // Simulate StrikeResolver having anchored the real T0 boundary strike
+    engine.setStrikePrice(85000, engine.currentSlot.epoch, "candle-boundary");
 
     // Ingest Up book
     engine.handleNormalizedEvent({

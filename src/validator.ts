@@ -10,6 +10,7 @@ export interface SafetyParams {
   upEmpty: boolean;
   downEmpty: boolean;
   feeModelVerified: boolean;
+  strikeVerified?: boolean;
 }
 
 export interface SafetyReport {
@@ -42,6 +43,8 @@ export function evaluateSafety(params: SafetyParams): SafetyReport {
   if (incompleteLegs) reasons.push("INCOMPLETE_LEGS");
 
   if (!params.feeModelVerified) reasons.push("FEE_MODEL_UNVERIFIED");
+
+  if (params.strikeVerified === false) reasons.push("STRIKE_UNVERIFIED");
 
   const failClosed = reasons.length > 0;
   const canTrade = !failClosed;
