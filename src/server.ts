@@ -42,6 +42,23 @@ export function createServer(options: ServerOptions) {
     pendingAlerts.push(alert);
     alertHistory.unshift(alert);
     if (alertHistory.length > 50) alertHistory.pop();
+
+    // Dual-dispatch: On real VPS/EC2, send directly from Node.js background worker
+    if (DISCORD_WEBHOOK_URL) {
+      fetch(DISCORD_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => {
+        if (res.ok) {
+          // Remove from pending since Node.js delivered it directly
+          const idx = pendingAlerts.findIndex((a) => a.id === alert.id);
+          if (idx !== -1) pendingAlerts.splice(idx, 1);
+        }
+      }).catch(() => {
+        // Fallback: remains in pendingAlerts for browser relay if direct fetch is blocked
+      });
+    }
   };
 
   app.use(express.json({ limit: "5mb" }));

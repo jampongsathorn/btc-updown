@@ -48,6 +48,9 @@ export interface VarianceCollapseResult {
   netEdgeDownPct: number;
   recommendedAction: "BUY_UP" | "BUY_DOWN" | "HOLD_NO_EDGE" | "STOP_LOSS_EXIT";
   reason: string;
+  realizedVol?: number;
+  kellyFraction?: number;
+  recommendedShares?: number;
 }
 
 export function evaluateVarianceCollapse(input: VarianceCollapseInput): VarianceCollapseResult {

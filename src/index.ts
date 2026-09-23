@@ -19,7 +19,7 @@ setInterval(() => {
   if (state) recorder.recordTick(state);
 }, 250);
 
-const serverOptions = {
+const serverOptions: any = {
   port: DEFAULT_CONFIG.PORT,
   stateStore: engine.stateStore,
   onRelayEvent: (event: any) => {
