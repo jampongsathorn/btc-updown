@@ -1,0 +1,62 @@
+import express from "express";
+import path from "path";
+import { StateStore } from "./state.js";
+import { TransportNormalizer, NormalizedEvent } from "./transport.js";
+
+export interface ServerOptions {
+  port: number;
+  stateStore: StateStore;
+  onRelayEvent: (event: NormalizedEvent) => void;
+  getActiveTokens: () => { current: string[]; next: string[] };
+}
+
+export function createServer(options: ServerOptions) {
+  const app = express();
+  const normalizer = new TransportNormalizer();
+
+  app.use(express.json({ limit: "5mb" }));
+  app.use(express.static(path.join(process.cwd(), "public")));
+
+  app.get("/api/state", (_req, res) => {
+    const state = options.stateStore.readState();
+    if (!state) {
+      res.status(503).json({ error: "State not initialized yet" });
+      return;
+    }
+    res.json(state);
+  });
+
+  app.get("/api/tokens", (_req, res) => {
+    res.json(options.getActiveTokens());
+  });
+
+  app.post("/api/relay/tick", (req, res) => {
+    const body = req.body;
+    let normalized: NormalizedEvent | null = null;
+
+    if (body.type && body.assetId) {
+      normalized = body as NormalizedEvent;
+    } else {
+      normalized = normalizer.parseRawMessage(typeof body === "string" ? body : JSON.stringify(body));
+    }
+
+    if (normalized) {
+      options.onRelayEvent(normalized);
+      res.json({ ok: true });
+    } else {
+      res.status(400).json({ error: "Unrecognized event format" });
+    }
+  });
+
+  app.get("/api/health", (_req, res) => {
+    const state = options.stateStore.readState();
+    res.json({
+      status: "ok",
+      canTrade: state?.safety?.canTrade ?? false,
+      failClosed: state?.safety?.failClosed ?? true,
+      reasons: state?.safety?.reasons ?? ["INITIALIZING"],
+    });
+  });
+
+  return app;
+}
