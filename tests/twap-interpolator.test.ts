@@ -36,4 +36,17 @@ describe("Chainlink 60s TWAP vs Spot Interpolator", () => {
     // TWAP standard deviation must be strictly lower than spot standard deviation
     expect(twapSd).toBeLessThan(spotSd * 0.40);
   });
+
+  it("should clamp z-score near slot end so ordinary tick noise doesn't blow it up to hundreds of sigma", () => {
+    const predictor = new ChainlinkTwapPredictor({
+      slotEpoch: 1790170500,
+      twapWindowSeconds: 60,
+    });
+
+    // 0.1s remaining: twapStdDev collapses toward its 0.01 floor (see
+    // getRemainingTwapStdDev), so a completely ordinary few-cent drift from
+    // strike would otherwise produce a z-score in the hundreds.
+    const est = predictor.estimateFinalTwap(85405, 299.9, 0.55, 85400);
+    expect(Math.abs(est.zScoreVsStrike)).toBeLessThanOrEqual(6);
+  });
 });

@@ -61,8 +61,13 @@ export class ChainlinkTwapPredictor {
     // Standard deviation of remaining TWAP
     const twapStdDev = this.getRemainingTwapStdDev(remainingTau, currentSpot, annualizedVol);
 
-    // Z-score of expected TWAP relative to strike
-    const zScoreVsStrike = twapStdDev > 0 ? (expectedTwap - strikePrice) / twapStdDev : 0;
+    // Z-score of expected TWAP relative to strike. Clamped to +/-6: as tau -> 0,
+    // twapStdDev collapses toward its 0.01 floor, so ordinary tick-to-tick price
+    // noise (a few cents) would otherwise blow the ratio up to hundreds of sigma
+    // and flip the sign on essentially every tick - a numerical artifact, not a
+    // real probability swing. +/-6 already saturates normalCdf to ~99.9999%/~0.0001%.
+    const rawZScore = twapStdDev > 0 ? (expectedTwap - strikePrice) / twapStdDev : 0;
+    const zScoreVsStrike = Math.max(-6, Math.min(6, rawZScore));
 
     return {
       currentSpot,
