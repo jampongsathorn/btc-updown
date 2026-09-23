@@ -116,4 +116,28 @@ export interface LiveEngineState {
     downBestBid?: number;
     downBestAsk?: number;
   };
+  strategy?: {
+    zScore: number;
+    trueProbabilityUp: number;
+    trueProbabilityDown: number;
+    inSniperWindow: boolean;
+    expectedValueUp: number;
+    expectedValueDown: number;
+    netEdgeUpPct: number;
+    netEdgeDownPct: number;
+    recommendedAction: "BUY_UP" | "BUY_DOWN" | "HOLD_NO_EDGE";
+    reason: string;
+    priceToBeat?: number;
+    currentSpot?: number;
+  };
+  paperWallet?: {
+    balanceUsd: number;
+    initialUsd: number;
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    winRatePct: number;
+    realizedPnlUsd: number;
+    returnPct: number;
+  };
 }

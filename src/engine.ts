@@ -6,6 +6,8 @@ import { calculateEconomics, FeeSchedule } from "./economics.js";
 import { evaluateSafety } from "./validator.js";
 import { StateStore } from "./state.js";
 import { NodeWsClient, NormalizedEvent } from "./transport.js";
+import { evaluateVarianceCollapse, VarianceCollapseResult } from "./strategies/variance-collapse.js";
+import { PaperWallet } from "./paper-wallet.js";
 
 export interface EngineOptions {
   config?: EngineConfig;
@@ -29,6 +31,10 @@ export class MarketEngine {
   public nextUpBook = new Orderbook();
   public nextDownBook = new Orderbook();
   public nextTokens: { up: string; down: string } = { up: "", down: "" };
+
+  public wallet = new PaperWallet({ initialUsd: 1000 });
+  public priceToBeat: number = 0;
+  public currentSpot: number = 0;
 
   private feeSchedule: FeeSchedule = {
     rate: 0.07,
@@ -123,6 +129,12 @@ export class MarketEngine {
     this.updateState();
   }
 
+  public setSpotPrices(spot: number, priceToBeat: number): void {
+    this.currentSpot = spot;
+    this.priceToBeat = priceToBeat;
+    this.updateState();
+  }
+
   public updateState(): LiveEngineState {
     const now = Date.now();
     this.currentSlot = this.scheduler.getCurrentSlot(now);
@@ -133,6 +145,11 @@ export class MarketEngine {
         this.nextSlot = next;
       },
       onRollover: (newCurrent) => {
+        // Settle previous slot in paper wallet
+        const prevEpoch = this.currentSlot.epoch;
+        const winner = this.currentSpot >= this.priceToBeat ? "UP" : "DOWN";
+        this.wallet.settleSlot(prevEpoch, winner);
+
         // Promote next to current
         this.currentSlot = newCurrent;
         this.currentTokens = this.nextTokens;
@@ -143,6 +160,7 @@ export class MarketEngine {
         this.nextUpBook = new Orderbook();
         this.nextDownBook = new Orderbook();
         this.nextTokens = { up: "", down: "" };
+        this.priceToBeat = 0;
       },
     });
 
@@ -163,6 +181,49 @@ export class MarketEngine {
       downEmpty: this.downBook.isEmpty(),
       feeModelVerified: this.feeModelVerified,
     });
+
+    // Evaluate Variance Collapse Quantitative Strategy
+    const effectiveSpot = this.currentSpot || (this.priceToBeat ? this.priceToBeat * (1 + (upLeg.mid - 0.5) * 0.002) : 85000);
+    const effectivePriceToBeat = this.priceToBeat || effectiveSpot;
+
+    const strategyResult = evaluateVarianceCollapse({
+      currentSpot: effectiveSpot,
+      priceToBeat: effectivePriceToBeat,
+      secondsRemaining: this.currentSlot.secondsRemaining,
+      upAsk: upLeg.bestAsk,
+      upBid: upLeg.bestBid,
+      downAsk: downLeg.bestAsk,
+      downBid: downLeg.bestBid,
+      takerFeeRate: this.feeSchedule.rate,
+    });
+
+    // Auto Paper Execution when EV > threshold and in sniper window
+    if (strategyResult.recommendedAction !== "HOLD_NO_EDGE" && safety.canTrade) {
+      const activeForSlot = this.wallet.getStats().activePositions.some(p => p.slotEpoch === this.currentSlot.epoch);
+      if (!activeForSlot) {
+        if (strategyResult.recommendedAction === "BUY_UP" && upLeg.bestAsk > 0) {
+          const shares = Math.min(50, upLeg.askTopSize || 50);
+          const fee = this.feeSchedule.rate * upLeg.bestAsk * (1 - upLeg.bestAsk) * shares;
+          this.wallet.openPosition({
+            slotEpoch: this.currentSlot.epoch,
+            side: "UP",
+            shares,
+            price: upLeg.bestAsk,
+            fee,
+          });
+        } else if (strategyResult.recommendedAction === "BUY_DOWN" && downLeg.bestAsk > 0) {
+          const shares = Math.min(50, downLeg.askTopSize || 50);
+          const fee = this.feeSchedule.rate * downLeg.bestAsk * (1 - downLeg.bestAsk) * shares;
+          this.wallet.openPosition({
+            slotEpoch: this.currentSlot.epoch,
+            side: "DOWN",
+            shares,
+            price: downLeg.bestAsk,
+            fee,
+          });
+        }
+      }
+    }
 
     const liveState: LiveEngineState = {
       meta: {
@@ -191,6 +252,12 @@ export class MarketEngine {
         slug: this.nextSlot.slug,
         warmedUp: !this.nextUpBook.isEmpty() && !this.nextDownBook.isEmpty(),
       },
+      strategy: {
+        ...strategyResult,
+        priceToBeat: this.priceToBeat,
+        currentSpot: this.currentSpot,
+      },
+      paperWallet: this.wallet.getStats(),
     };
 
     this.stateStore.writeState(liveState);

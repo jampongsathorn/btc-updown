@@ -90,6 +90,28 @@
     </div>
   </div>
 
+  <!-- QUANTITATIVE STRATEGY & PAPER TRADING -->
+  <div class="grid" style="margin-bottom: 20px;">
+    <div class="card">
+      <div class="card-title" style="color: var(--cyan);">Quantitative Strategy (Variance Collapse Sniper)</div>
+      <div class="stat-row"><span>Strategy Action:</span><span class="stat-val" id="strat-action" style="font-size: 15px; color: var(--yellow);">HOLD_NO_EDGE</span></div>
+      <div class="stat-row"><span>Model Probability Up (p*):</span><span class="stat-val" id="strat-prob-up">--%</span></div>
+      <div class="stat-row"><span>Model Probability Down (p*):</span><span class="stat-val" id="strat-prob-down">--%</span></div>
+      <div class="stat-row"><span>Expected Value (EV Up):</span><span class="stat-val" id="strat-ev-up">--</span></div>
+      <div class="stat-row"><span>Expected Value (EV Down):</span><span class="stat-val" id="strat-ev-down">--</span></div>
+      <div class="stat-row"><span>Confidence Z-Score:</span><span class="stat-val" id="strat-z">--</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="color: var(--green);">Paper Trading Simulation (Automated Execution)</div>
+      <div class="stat-row"><span>Virtual Balance:</span><span class="stat-val" id="paper-balance" style="font-size: 16px; color: var(--green);">$1,000.00</span></div>
+      <div class="stat-row"><span>Realized PnL:</span><span class="stat-val" id="paper-pnl">$0.00 (0.0%)</span></div>
+      <div class="stat-row"><span>Win Rate:</span><span class="stat-val" id="paper-winrate">0.0%</span></div>
+      <div class="stat-row"><span>Total Completed Trades:</span><span class="stat-val" id="paper-trades">0</span></div>
+      <div class="stat-row"><span>Active Slot Position:</span><span class="stat-val" id="paper-active">None</span></div>
+    </div>
+  </div>
+
   <div class="grid">
     <!-- UP TOKEN ORDERBOOK -->
     <div class="card">
@@ -275,6 +297,31 @@
       document.getElementById("net-edge").innerText = `$${s.signal.buyBothNetEdge.toFixed(4)}`;
       document.getElementById("arb-viable").innerText = s.economics.buyBothArbitrage.isViable ? "YES (PROFITABLE)" : "False";
       document.getElementById("arb-viable").style.color = s.economics.buyBothArbitrage.isViable ? "var(--green)" : "var(--yellow)";
+
+      // Strategy
+      if (s.strategy) {
+        const actionEl = document.getElementById("strat-action");
+        actionEl.innerText = s.strategy.recommendedAction;
+        actionEl.style.color = s.strategy.recommendedAction === "HOLD_NO_EDGE" ? "var(--yellow)" : "var(--green)";
+        document.getElementById("strat-prob-up").innerText = `${(s.strategy.trueProbabilityUp * 100).toFixed(1)}%`;
+        document.getElementById("strat-prob-down").innerText = `${(s.strategy.trueProbabilityDown * 100).toFixed(1)}%`;
+        document.getElementById("strat-ev-up").innerText = `$${s.strategy.expectedValueUp.toFixed(3)} (${s.strategy.netEdgeUpPct}%)`;
+        document.getElementById("strat-ev-down").innerText = `$${s.strategy.expectedValueDown.toFixed(3)} (${s.strategy.netEdgeDownPct}%)`;
+        document.getElementById("strat-z").innerText = s.strategy.zScore.toFixed(2);
+      }
+
+      // Paper Wallet
+      if (s.paperWallet) {
+        document.getElementById("paper-balance").innerText = `$${s.paperWallet.balanceUsd.toFixed(2)}`;
+        const pnlEl = document.getElementById("paper-pnl");
+        pnlEl.innerText = `$${s.paperWallet.realizedPnlUsd.toFixed(2)} (${s.paperWallet.returnPct >= 0 ? '+' : ''}${s.paperWallet.returnPct}%)`;
+        pnlEl.style.color = s.paperWallet.realizedPnlUsd >= 0 ? "var(--green)" : "var(--red)";
+        document.getElementById("paper-winrate").innerText = `${s.paperWallet.winRatePct}% (${s.paperWallet.wins}W - ${s.paperWallet.losses}L)`;
+        document.getElementById("paper-trades").innerText = s.paperWallet.totalTrades;
+        document.getElementById("paper-active").innerText = s.paperWallet.activePositions && s.paperWallet.activePositions.length > 0
+          ? `${s.paperWallet.activePositions[0].side} (${s.paperWallet.activePositions[0].shares} shares @ $${s.paperWallet.activePositions[0].price})`
+          : "None";
+      }
 
       // Books
       renderBook("up", s.up);

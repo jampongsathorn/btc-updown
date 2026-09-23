@@ -43,6 +43,26 @@ function formatSignal() {
   console.log(`  \x1b[32mUP TOKEN:\x1b[0m   Bid: \x1b[1m$${s.up.bestBid.toFixed(2)}\x1b[0m (${s.up.bidTopSize}) | Ask: \x1b[1m$${s.up.bestAsk.toFixed(2)}\x1b[0m (${s.up.askTopSize}) | Mid: $${s.up.mid.toFixed(3)} | Spr: $${s.up.spread.toFixed(3)}`);
   console.log(`  \x1b[31mDOWN TOKEN:\x1b[0m Bid: \x1b[1m$${s.down.bestBid.toFixed(2)}\x1b[0m (${s.down.bidTopSize}) | Ask: \x1b[1m$${s.down.bestAsk.toFixed(2)}\x1b[0m (${s.down.askTopSize}) | Mid: $${s.down.mid.toFixed(3)} | Spr: $${s.down.spread.toFixed(3)}`);
   console.log("------------------------------------------------------------");
+  if (s.strategy) {
+    const strat = s.strategy;
+    const actionColor = strat.recommendedAction === "HOLD_NO_EDGE" ? "\x1b[33m" : "\x1b[32m";
+    console.log("  \x1b[1mQUANTITATIVE STRATEGY (VARIANCE COLLAPSE SNIPER):\x1b[0m");
+    console.log(`  • Model Prob (p*):             Up: ${(strat.trueProbabilityUp * 100).toFixed(1)}% | Down: ${(strat.trueProbabilityDown * 100).toFixed(1)}% (Z: ${strat.zScore})`);
+    console.log(`  • Expected Value (EV):         Up: \x1b[1m+$${strat.expectedValueUp.toFixed(3)}\x1b[0m | Down: \x1b[1m+$${strat.expectedValueDown.toFixed(3)}\x1b[0m`);
+    console.log(`  • Action Decision:             ${actionColor}\x1b[1m[${strat.recommendedAction}]\x1b[0m — ${strat.reason}`);
+    console.log("------------------------------------------------------------");
+  }
+
+  if (s.paperWallet) {
+    const w = s.paperWallet;
+    const pnlColor = w.realizedPnlUsd >= 0 ? "\x1b[32m" : "\x1b[31m";
+    console.log("  \x1b[1mPAPER TRADING SIMULATION PERFORMANCE:\x1b[0m");
+    console.log(`  • Virtual Balance:             $${w.balanceUsd.toFixed(2)} USD (Initial: $${w.initialUsd.toFixed(2)})`);
+    console.log(`  • Realized PnL:                ${pnlColor}\x1b[1m$${w.realizedPnlUsd.toFixed(2)} (${w.returnPct >= 0 ? "+" : ""}${w.returnPct}%)\x1b[0m`);
+    console.log(`  • Trades Record:               Total: ${w.totalTrades} | Win-Rate: \x1b[1m${w.winRatePct}%\x1b[0m (${w.wins}W - ${w.losses}L)`);
+    console.log("------------------------------------------------------------");
+  }
+
   console.log("  \x1b[1mTRI-PARITY & EXECUTABLE ECONOMICS:\x1b[0m");
   console.log(`  • Mid Parity (Up + Down):      $${s.signal.midParity.toFixed(4)}`);
   console.log(`  • Buy Both Cost (Ask Sum):     $${s.signal.buyBothCost.toFixed(4)}`);

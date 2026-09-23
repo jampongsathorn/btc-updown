@@ -25,6 +25,9 @@ const app = createServer({
   setTokenIds: (current, next) => {
     engine.setTokenIds(current, next);
   },
+  setSpotPrices: (spot, priceToBeat) => {
+    engine.setSpotPrices(spot, priceToBeat || spot);
+  },
   getLatestFlightSummary: () => recorder.getLatestSummary(),
 });
 

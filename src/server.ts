@@ -9,6 +9,7 @@ export interface ServerOptions {
   onRelayEvent: (event: NormalizedEvent) => void;
   getActiveTokens: () => { current: string[]; next: string[] };
   setTokenIds?: (current: { up: string; down: string }, next?: { up: string; down: string }) => void;
+  setSpotPrices?: (spot: number, priceToBeat?: number) => void;
   getLatestFlightSummary?: () => any;
 }
 
@@ -67,6 +68,16 @@ export function createServer(options: ServerOptions) {
       return;
     }
     res.json(summary);
+  });
+
+  app.post("/api/spot", (req, res) => {
+    const { spot, priceToBeat } = req.body;
+    if (spot) {
+      options.setSpotPrices?.(spot, priceToBeat || spot);
+      res.json({ ok: true });
+    } else {
+      res.status(400).json({ error: "Missing spot price" });
+    }
   });
 
   app.get("/api/health", (_req, res) => {
