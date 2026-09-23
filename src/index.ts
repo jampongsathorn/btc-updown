@@ -15,6 +15,9 @@ const app = createServer({
     current: [engine.currentTokens.up, engine.currentTokens.down].filter(Boolean),
     next: [engine.nextTokens.up, engine.nextTokens.down].filter(Boolean),
   }),
+  setTokenIds: (current, next) => {
+    engine.setTokenIds(current, next);
+  },
 });
 
 app.listen(DEFAULT_CONFIG.PORT, "0.0.0.0", () => {

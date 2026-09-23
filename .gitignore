@@ -1,0 +1,10 @@
+node_modules/
+dist/
+state/*.tmp
+state/*.json
+.superpowers/
+.claude/
+.cursor/
+.codex/
+agent/
+skills-lock.json

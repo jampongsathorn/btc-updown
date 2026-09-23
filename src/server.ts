@@ -8,6 +8,7 @@ export interface ServerOptions {
   stateStore: StateStore;
   onRelayEvent: (event: NormalizedEvent) => void;
   getActiveTokens: () => { current: string[]; next: string[] };
+  setTokenIds?: (current: { up: string; down: string }, next?: { up: string; down: string }) => void;
 }
 
 export function createServer(options: ServerOptions) {
@@ -45,6 +46,16 @@ export function createServer(options: ServerOptions) {
       res.json({ ok: true });
     } else {
       res.status(400).json({ error: "Unrecognized event format" });
+    }
+  });
+
+  app.post("/api/tokens/register", (req, res) => {
+    const { current, next } = req.body;
+    if (current && current.up && current.down) {
+      options.setTokenIds?.(current, next);
+      res.json({ ok: true });
+    } else {
+      res.status(400).json({ error: "Invalid tokens payload" });
     }
   });
 

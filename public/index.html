@@ -155,18 +155,50 @@
       }
     }
 
-    // 2. Fetch active tokens for client-side WS relay
+    // 2. Fetch active tokens or resolve from Gamma API directly from client browser
     async function syncTokens() {
       try {
         const res = await fetch("/api/tokens");
         if (res.ok) {
           const data = await res.json();
-          if (JSON.stringify(data) !== JSON.stringify(activeTokens)) {
-            activeTokens = data;
-            subscribePolymarketWs();
+          if (data.current.length > 0) {
+            if (JSON.stringify(data) !== JSON.stringify(activeTokens)) {
+              activeTokens = data;
+              subscribePolymarketWs();
+            }
+            return;
           }
         }
-      } catch {}
+
+        // If backend hasn't populated tokens, resolve from Gamma API directly in browser
+        const stateRes = await fetch("/api/state");
+        if (stateRes.ok) {
+          const s = await stateRes.json();
+          if (s && s.slot && s.slot.slug) {
+            const gammaRes = await fetch(`https://gamma-api.polymarket.com/events?slug=${s.slot.slug}`);
+            if (gammaRes.ok) {
+              const events = await gammaRes.json();
+              if (events && events[0] && events[0].markets && events[0].markets[0]) {
+                const m = events[0].markets[0];
+                const tokenIds = JSON.parse(m.clobTokenIds || "[]");
+                if (tokenIds.length >= 2) {
+                  activeTokens = { current: tokenIds, next: [] };
+                  await fetch("/api/tokens/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      current: { up: tokenIds[0], down: tokenIds[1] },
+                    }),
+                  });
+                  subscribePolymarketWs();
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Token sync error:", err);
+      }
     }
 
     // 3. Direct browser WebSocket to Polymarket CLOB (bypasses sandbox firewall)
