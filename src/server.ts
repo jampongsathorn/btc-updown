@@ -99,16 +99,18 @@ export function createServer(options: ServerOptions) {
 
   app.post("/api/relay/tick", (req, res) => {
     const body = req.body;
-    let normalized: NormalizedEvent | null = null;
+    let normalizedEvents: NormalizedEvent[];
 
     if (body.type && body.assetId) {
-      normalized = body as NormalizedEvent;
+      normalizedEvents = [body as NormalizedEvent];
     } else {
-      normalized = normalizer.parseRawMessage(typeof body === "string" ? body : JSON.stringify(body));
+      normalizedEvents = normalizer.parseRawMessage(typeof body === "string" ? body : JSON.stringify(body));
     }
 
-    if (normalized) {
-      options.onRelayEvent(normalized);
+    if (normalizedEvents.length > 0) {
+      for (const normalized of normalizedEvents) {
+        options.onRelayEvent(normalized);
+      }
       res.json({ ok: true });
     } else {
       res.status(400).json({ error: "Unrecognized event format" });
