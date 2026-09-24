@@ -20,6 +20,19 @@ export interface TickRecord {
   buyBothGrossEdge: number;
   buyBothNetEdge: number;
   arbViable: boolean;
+  // Directional strategy fields (variance-collapse) - added so signal
+  // frequency/near-misses can be analyzed from history instead of only
+  // ever knowing "0 trades happened" with no visibility into how close
+  // the strategy got.
+  recommendedAction: string;
+  inSniperWindow: boolean;
+  zScore: number;
+  trueProbabilityUp: number;
+  netEdgeUpPct: number;
+  netEdgeDownPct: number;
+  expectedValueUp: number;
+  expectedValueDown: number;
+  recommendedShares: number;
 }
 
 export interface SlotSummary {
@@ -42,6 +55,13 @@ export interface SlotSummary {
   arbOpportunityPct: number;
   startedAt: string;
   finishedAt: string;
+  // Directional signal stats for this slot.
+  sniperWindowTicks: number;
+  signalTicks: number; // ticks where recommendedAction was BUY_UP or BUY_DOWN
+  finalAction: string; // recommendedAction on the last recorded tick
+  maxNetEdgeUpPct: number; // peak edge seen, even if it never crossed the entry threshold
+  maxNetEdgeDownPct: number;
+  peakZScoreAbs: number;
 }
 
 export class MarketRecorder {
@@ -96,6 +116,15 @@ export class MarketRecorder {
       buyBothGrossEdge: state.signal.buyBothGrossEdge,
       buyBothNetEdge: state.signal.buyBothNetEdge,
       arbViable: state.economics.buyBothArbitrage.isViable,
+      recommendedAction: state.strategy?.recommendedAction ?? "HOLD_NO_EDGE",
+      inSniperWindow: state.strategy?.inSniperWindow ?? false,
+      zScore: state.strategy?.zScore ?? 0,
+      trueProbabilityUp: state.strategy?.trueProbabilityUp ?? 0.5,
+      netEdgeUpPct: state.strategy?.netEdgeUpPct ?? 0,
+      netEdgeDownPct: state.strategy?.netEdgeDownPct ?? 0,
+      expectedValueUp: state.strategy?.expectedValueUp ?? 0,
+      expectedValueDown: state.strategy?.expectedValueDown ?? 0,
+      recommendedShares: state.strategy?.recommendedShares ?? 0,
     };
 
     this.currentTicks.push(record);
@@ -113,6 +142,8 @@ export class MarketRecorder {
     const netEdges = ticks.map(t => t.buyBothNetEdge);
     const costs = ticks.map(t => t.buyBothCost);
     const arbTicks = ticks.filter(t => t.arbViable).length;
+    const sniperWindowTicks = ticks.filter(t => t.inSniperWindow).length;
+    const signalTicks = ticks.filter(t => t.recommendedAction === "BUY_UP" || t.recommendedAction === "BUY_DOWN").length;
 
     const upMidMin = Math.min(...upMids);
     const upMidMax = Math.max(...upMids);
@@ -137,6 +168,12 @@ export class MarketRecorder {
       arbOpportunityPct: parseFloat(((arbTicks / ticks.length) * 100).toFixed(1)),
       startedAt: new Date(ticks[0].timestamp).toISOString(),
       finishedAt: new Date(ticks[ticks.length - 1].timestamp).toISOString(),
+      sniperWindowTicks,
+      signalTicks,
+      finalAction: ticks[ticks.length - 1].recommendedAction,
+      maxNetEdgeUpPct: parseFloat(Math.max(...ticks.map(t => t.netEdgeUpPct)).toFixed(2)),
+      maxNetEdgeDownPct: parseFloat(Math.max(...ticks.map(t => t.netEdgeDownPct)).toFixed(2)),
+      peakZScoreAbs: parseFloat(Math.max(...ticks.map(t => Math.abs(t.zScore))).toFixed(3)),
     };
 
     // Save JSON flight log
@@ -145,9 +182,9 @@ export class MarketRecorder {
 
     // Save CSV
     const csvPath = path.join(this.outputDir, `flight-log-${epoch}.csv`);
-    const csvHeader = "timestamp,elapsedSec,remSec,upBid,upAsk,upMid,upSpread,downBid,downAsk,downMid,downSpread,midParity,buyBothCost,buyBothNetEdge,arbViable\n";
+    const csvHeader = "timestamp,elapsedSec,remSec,upBid,upAsk,upMid,upSpread,downBid,downAsk,downMid,downSpread,midParity,buyBothCost,buyBothNetEdge,arbViable,recommendedAction,inSniperWindow,zScore,trueProbabilityUp,netEdgeUpPct,netEdgeDownPct,recommendedShares\n";
     const csvRows = ticks.map(t =>
-      `${t.timestamp},${t.elapsedSec},${t.remSec},${t.upBid},${t.upAsk},${t.upMid},${t.upSpread},${t.downBid},${t.downAsk},${t.downMid},${t.downSpread},${t.midParity},${t.buyBothCost},${t.buyBothNetEdge},${t.arbViable}`
+      `${t.timestamp},${t.elapsedSec},${t.remSec},${t.upBid},${t.upAsk},${t.upMid},${t.upSpread},${t.downBid},${t.downAsk},${t.downMid},${t.downSpread},${t.midParity},${t.buyBothCost},${t.buyBothNetEdge},${t.arbViable},${t.recommendedAction},${t.inSniperWindow},${t.zScore},${t.trueProbabilityUp},${t.netEdgeUpPct},${t.netEdgeDownPct},${t.recommendedShares}`
     ).join("\n");
     fs.writeFileSync(csvPath, csvHeader + csvRows, "utf8");
 

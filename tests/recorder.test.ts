@@ -47,4 +47,48 @@ describe("Market Flight Recorder", () => {
 
     expect(fs.existsSync(testJsonPath)).toBe(true);
   });
+
+  it("records recommendedAction/edge/z-score per tick and aggregates signal stats into the summary (added so 'how often did a real signal almost fire' can be answered from history, not just from the always-in-memory alert log)", () => {
+    const recorder = new MarketRecorder({ outputDir: testDir });
+
+    const mockStateWithStrategy = (epoch: number, elapsed: number, recommendedAction: string, netEdgeUpPct: number, zScore: number): LiveEngineState => ({
+      meta: { snapshotId: "test", generatedAt: Date.now(), bookSequence: 1, slotEpoch: epoch, source: "node-ws" },
+      slot: { epoch, slug: `btc-updown-5m-${epoch}`, title: "Test", conditionId: "c1", secondsRemaining: 300 - elapsed, progressPct: (elapsed / 300) * 100, warmupPhase: false },
+      safety: { failClosed: false, canTrade: true, reasons: [], bookAgeMs: 10, maxBookAgeMsConfig: 2500, connected: true, crossedBook: false, stale: false, currentReady: true, nextReady: false, feeModelVerified: true },
+      signal: { midParity: 1, buyBothCost: 1.01, buyBothGrossEdge: 0.02, sellBothValue: 0.98, sellBothGrossEdge: -0.02, executableDepthShares: 100, buyBothNetEdge: -0.05, imbalanceUp: 0, imbalanceDown: 0 },
+      economics: {
+        feeSchedule: { rate: 0.07, exponent: 1, takerOnly: true, rebateRate: 0.2 },
+        buyUp: { marketPrice: 0.51, benchmarkShares: 100, grossCostUsd: 50, estimatedTakerFeeUsd: 3.5, effectivePricePerShare: 0.535, slippageBps: 0 },
+        buyDown: { marketPrice: 0.51, benchmarkShares: 100, grossCostUsd: 50, estimatedTakerFeeUsd: 3.5, effectivePricePerShare: 0.535, slippageBps: 0 },
+        buyBothArbitrage: { isViable: false, askSum: 1.01, grossEdgeUsd: 2, estimatedTotalFeesUsd: 1, netEdgeUsd: -5, maxExecutableShares: 100 },
+      },
+      up: { tokenId: "up", bestBid: 0.49, bestAsk: 0.51, mid: 0.5, spread: 0.02, bidDepthTotalUsd: 100, askDepthTotalUsd: 100, bidTopSize: 50, askTopSize: 50, imbalance: 0, bids: [], asks: [] },
+      down: { tokenId: "down", bestBid: 0.49, bestAsk: 0.51, mid: 0.5, spread: 0.02, bidDepthTotalUsd: 100, askDepthTotalUsd: 100, bidTopSize: 50, askTopSize: 50, imbalance: 0, bids: [], asks: [] },
+      strategy: {
+        zScore, trueProbabilityUp: 0.5, trueProbabilityDown: 0.5,
+        inSniperWindow: elapsed >= 210,
+        expectedValueUp: 0.01, expectedValueDown: 0.01,
+        netEdgeUpPct, netEdgeDownPct: -1,
+        recommendedAction: recommendedAction as any,
+        reason: "test", recommendedShares: recommendedAction === "BUY_UP" ? 20 : 0,
+      },
+    });
+
+    const epoch = testEpoch + 1;
+    recorder.recordTick(mockStateWithStrategy(epoch, 200, "HOLD_NO_EDGE", 1.2, 0.8));
+    recorder.recordTick(mockStateWithStrategy(epoch, 220, "HOLD_NO_EDGE", 2.5, 1.4));
+    recorder.recordTick(mockStateWithStrategy(epoch, 240, "BUY_UP", 3.1, 2.0)); // the one real signal tick
+
+    const summary = recorder.finalizeSlot(epoch);
+    const jsonPath = path.join(testDir, `flight-log-${epoch}.json`);
+
+    expect(summary?.sniperWindowTicks).toBe(2); // elapsed=200 is before the >=210 cutoff in this mock
+    expect(summary?.signalTicks).toBe(1);
+    expect(summary?.finalAction).toBe("BUY_UP");
+    expect(summary?.maxNetEdgeUpPct).toBe(3.1);
+    expect(summary?.peakZScoreAbs).toBe(2);
+
+    fs.unlinkSync(jsonPath);
+    fs.unlinkSync(path.join(testDir, `flight-log-${epoch}.csv`));
+  });
 });
