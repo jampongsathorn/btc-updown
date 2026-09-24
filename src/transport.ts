@@ -109,6 +109,7 @@ export class NodeWsClient {
   private activeSubscriptions: Set<string> = new Set();
   private isConnected = false;
   private closedByUser = false;
+  private lastActivityAt = Date.now();
 
   constructor(private options: NodeWsClientOptions) {
     this.wsUrl = options.wsUrl || "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -120,20 +121,36 @@ export class NodeWsClient {
 
       this.ws.on("open", () => {
         this.isConnected = true;
+        this.lastActivityAt = Date.now();
         this.options.onConnect?.();
 
         if (this.activeSubscriptions.size > 0) {
           this.subscribe(Array.from(this.activeSubscriptions));
         }
 
+        // Confirmed 2026-09-23/24: this connection can go "silently dead" -
+        // the TCP socket stays open (no "close"/"error" event ever fires)
+        // but Polymarket's server simply stops pushing messages. The old
+        // code only sent PING and never checked whether ANYTHING came back,
+        // so a dead-but-still-open socket was invisible to us - engine.ts's
+        // orderbook just sat frozen (stale + eventually crossed) for hours,
+        // with zero errors logged, until someone noticed and restarted the
+        // process by hand. This interval force-closes the socket (which
+        // triggers the existing close -> handleDisconnect -> reconnect
+        // path) if NOTHING has arrived - not even a PONG - in 25s, well
+        // past two full 10s ping cycles.
         this.pingInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send("PING");
+          if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+          if (Date.now() - this.lastActivityAt > 25000) {
+            this.ws.terminate();
+            return;
           }
+          this.ws.send("PING");
         }, 10000);
       });
 
       this.ws.on("message", (data) => {
+        this.lastActivityAt = Date.now();
         const normalizedEvents = this.normalizer.parseRawMessage(data as Buffer);
         for (const normalized of normalizedEvents) {
           this.options.onEvent(normalized);
