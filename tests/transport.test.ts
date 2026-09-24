@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TransportNormalizer } from "../src/transport";
+import { TransportNormalizer, NodeWsClient } from "../src/transport";
 
 describe("Transport Normalizer", () => {
   it("should normalize raw CLOB book snapshot message", () => {
@@ -71,5 +71,20 @@ describe("Transport Normalizer", () => {
     const downEvent = events.find(e => e.assetId === "down-token");
     expect(upEvent?.priceChanges).toEqual([{ side: "SELL", price: "0.99", size: "9856.37" }]);
     expect(downEvent?.priceChanges).toEqual([{ side: "BUY", price: "0.01", size: "9856.37" }]);
+  });
+});
+
+describe("NodeWsClient.subscribe", () => {
+  it("REPLACES the tracked subscription set instead of accumulating it forever (confirmed 2026-09-24: unbounded growth across every slot rollover for hours is the likely cause of a reconnect resubscribing with hundreds of long-expired token ids and burying the handful that actually matter)", () => {
+    const client = new NodeWsClient({ onEvent: () => {} });
+
+    client.subscribe(["slot1-up", "slot1-down"]);
+    expect(client.getActiveSubscriptionCount()).toBe(2);
+
+    client.subscribe(["slot2-up", "slot2-down", "slot3-up", "slot3-down"]);
+    // engine.ts always calls subscribe() with the complete current desired
+    // set (current + next slot's tokens) - slot1's tokens are gone now,
+    // not accumulated alongside slot2/slot3's.
+    expect(client.getActiveSubscriptionCount()).toBe(4);
   });
 });

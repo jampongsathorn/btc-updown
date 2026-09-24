@@ -123,6 +123,7 @@ export class NodeWsClient {
         this.isConnected = true;
         this.lastActivityAt = Date.now();
         this.options.onConnect?.();
+        console.log(`[transport] Connected (resubscribing to ${this.activeSubscriptions.size} token(s))`);
 
         if (this.activeSubscriptions.size > 0) {
           this.subscribe(Array.from(this.activeSubscriptions));
@@ -142,6 +143,7 @@ export class NodeWsClient {
         this.pingInterval = setInterval(() => {
           if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
           if (Date.now() - this.lastActivityAt > 25000) {
+            console.error(`[transport] No activity in ${Date.now() - this.lastActivityAt}ms - forcing reconnect`);
             this.ws.terminate();
             return;
           }
@@ -157,14 +159,17 @@ export class NodeWsClient {
         }
       });
 
-      this.ws.on("close", () => {
+      this.ws.on("close", (code, reason) => {
+        console.log(`[transport] Closed (code ${code}${reason?.length ? `, ${reason}` : ""})`);
         this.handleDisconnect();
       });
 
-      this.ws.on("error", () => {
+      this.ws.on("error", (err) => {
+        console.error(`[transport] Error: ${err?.message || err}`);
         this.handleDisconnect();
       });
-    } catch {
+    } catch (err: any) {
+      console.error(`[transport] connect() threw: ${err?.message || err}`);
       this.handleDisconnect();
     }
   }
@@ -173,6 +178,7 @@ export class NodeWsClient {
     this.isConnected = false;
     if (this.pingInterval) clearInterval(this.pingInterval);
     this.options.onDisconnect?.();
+    console.log(`[transport] Disconnected - reconnecting in 3s`);
 
     if (!this.closedByUser && !this.reconnectTimer) {
       this.reconnectTimer = setTimeout(() => {
@@ -183,7 +189,18 @@ export class NodeWsClient {
   }
 
   public subscribe(assetIds: string[]): void {
-    for (const id of assetIds) this.activeSubscriptions.add(id);
+    // REPLACES the tracked set, not additive.
+    // engine.ts's only caller always passes the complete current desired
+    // set (current up/down + next up/down), so accumulating instead of
+    // replacing let this grow unbounded across every slot rollover for
+    // hours - confirmed 2026-09-24 as the likely cause of a ~92-minute
+    // outage where the socket looked healthy (heartbeat satisfied by
+    // regular PONGs) but the orderbook stayed completely empty: a
+    // reconnect resubscribes with `Array.from(this.activeSubscriptions)`,
+    // and by then that list held hundreds of long-expired token ids from
+    // every slot since the process started, potentially burying or
+    // invalidating the handful of tokens that actually matter right now.
+    this.activeSubscriptions = new Set(assetIds);
     if (this.ws && this.ws.readyState === WebSocket.OPEN && assetIds.length > 0) {
       this.ws.send(JSON.stringify({
         type: "market",
@@ -205,6 +222,10 @@ export class NodeWsClient {
 
   public getConnected(): boolean {
     return this.isConnected;
+  }
+
+  public getActiveSubscriptionCount(): number {
+    return this.activeSubscriptions.size;
   }
 
   public close(): void {
